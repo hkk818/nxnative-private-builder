@@ -33,7 +33,7 @@ jobs:
           mkdir -p ~/.switch raw_dl extracted_game/exefs extracted_game/romfs
           if [ -n "$KEYS_B64" ]; then
             echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
-          }
+          fi
           gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs.zip" --clobber
           python3 -c '
           import zipfile, os
@@ -51,11 +51,9 @@ jobs:
       - name: 4. 调用官方脚本构建 iPhone 16 Pro 专用的空壳 IPA
         run: |
           cd nxnative
-          # 利用官方 python 脚本，将本地提取好的 exefs 作为输入源直接编译
           python3 scripts/build_ipa_from_nsp.py ../extracted_game -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa" || \
           python3 build.py --nsp-dir ../extracted_game --keys ~/.switch/prod.keys --platform ios -o "${{ github.workspace }}/nxnative-game-shell.ipa"
 
-          # 确保注入 16 Pro 高内存权限
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
