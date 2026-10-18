@@ -15,83 +15,60 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     steps:
-      - name: 1. 安装编译依赖
+      - name: 1. 安装官方指定的全部编译依赖
         run: |
           brew install xcodegen zstd spirv-cross
           brew install --cask dotnet-sdk
-          python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
+          python3 -m pip install --break-system-packages lz4 capstone fonttools nsz || python3 -m pip install lz4 capstone fonttools nsz
 
-      - name: 2. 拉取 nxnative 源码
+      - name: 2. 拉取最新 nxnative 源码
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
 
-      - name: 3. 下载并还原 exefs 与密钥
+      - name: 3. 下载并还原输入文件与密钥
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
         run: |
-          mkdir -p ~/.switch raw_dl extracted_game/exefs
+          mkdir -p ~/.switch raw_dl extracted_input
           if [ -n "$KEYS_B64" ]; then
             echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
+            cp ~/.switch/prod.keys nxnative/prod.keys
           fi
-          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs_bundle.zip" --clobber
+          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "nsp_bundle.zip" --clobber
           python3 -c '
           import zipfile, os
-          with zipfile.ZipFile("raw_dl/exefs_bundle.zip", "r") as z:
+          with zipfile.ZipFile("raw_dl/nsp_bundle.zip", "r") as z:
               for info in z.infolist():
                   fname = info.filename.replace("\\", "/")
                   if not fname.endswith("/"):
-                      target = os.path.join("extracted_game", fname)
+                      target = os.path.join("extracted_input", fname)
                       os.makedirs(os.path.dirname(target), exist_ok=True)
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          if [ -d "extracted_game/exefs" ]; then
-            cp -r extracted_game/exefs/* extracted_game/
+          if [ -d "extracted_input/input_nsp" ]; then
+            mv extracted_input/input_nsp/* extracted_input/ || true
           fi
-          ls -la extracted_game
+          ls -la extracted_input
 
-      - name: 4. 在云端构造标准游戏目录并调用官方脚本编译 IPA
+      - name: 4. 完美调用官方标准的 build_ipa_from_nsp.py 构建 IPA
         run: |
           cd nxnative
-          # 检查源码里自带的编译脚本名称
-          ls -la scripts/
-          
-          # 直接调用官方的 python 编译脚本，将我们的 extracted_game 传入
-          python3 scripts/build_ipa_from_nsp.py ../extracted_game -k ~/.switch/prod.keys -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" || \
-          python3 scripts/build_ipa_from_nsp.py ../extracted_game/ exefs/ -k ~/.switch/prod.keys -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" || true
+          python3 scripts/build_ipa_from_nsp.py ../extracted_input -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa"
 
-          # 兜底：如果直接调用失败，利用源码内的主构建逻辑强制生成
-          if [ ! -f "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" ]; then
-            echo "尝试使用通用 build 逻辑兜底..."
-            python3 -c '
-            import os, sys, subprocess
-            # 直接运行 nxnative 源码中的构建流程
-            for root, dirs, files in os.walk("scripts"):
-                for file in files:
-                    if file.endswith(".py") and "build" in file:
-                        script = os.path.join(root, file)
-                        print(f"Executing found build script: {script}")
-                        subprocess.run(["python3", script, "../extracted_game", "-k", os.path.expanduser("~/.switch/prod.keys"), "-o", "${{ github.workspace }}/final_output/nxnative-game-shell.ipa"])
-            '
-          fi
-
-          # 确保注入 16 Pro 高内存权限并打包
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-            mkdir -p "${{ github.workspace }}/final_output"
-            mkdir -p Payload
-            cp -r "$APP_DIR" Payload/
-            zip -r9 "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" Payload
           fi
-          ls -la "${{ github.workspace }}/final_output"
 
       - name: 5. 上传生成的无签名 IPA
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
-          path: ${{ github.workspace }}/final_output/*.ipa
+          path: |
+            ${{ github.workspace }}/*.ipa
+            nxnative/**/*.ipa
           if-no-files-found: error
           retention-days: 3
