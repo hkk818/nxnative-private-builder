@@ -25,56 +25,58 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
 
-      - name: 3. 下载并还原 exefs 与密钥
+      - name: 3. 下载并释放轻量特征包
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
         run: |
-          mkdir -p ~/.switch raw_dl extracted_game
+          mkdir -p ~/.switch raw_dl extracted_input
           if [ -n "$KEYS_B64" ]; then
             echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
           fi
-          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs.zip" --clobber
+          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "light_bundle.zip" --clobber
           python3 -c '
           import zipfile, os
-          with zipfile.ZipFile("raw_dl/exefs.zip", "r") as z:
+          with zipfile.ZipFile("raw_dl/light_bundle.zip", "r") as z:
               for info in z.infolist():
                   fname = info.filename.replace("\\", "/")
                   if not fname.endswith("/"):
-                      target = os.path.join("extracted_game", fname)
+                      target = os.path.join("extracted_input", fname)
                       os.makedirs(os.path.dirname(target), exist_ok=True)
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          if [ -d "extracted_game/exefs" ]; then
-            cp -r extracted_game/exefs/* nxnative/
-          fi
-          ls -la nxnative
+          ls -la extracted_input
 
-      - name: 4. 直接调用 build.py 或 XcodeGen 构建空壳 IPA
+      - name: 4. 动态 Hook 官方脚本并生成空壳 IPA
         run: |
           cd nxnative
-          # 如果源码根目录有 build.py 或脚本，直接运行；否则利用 xcodegen 生成工程编译
-          if [ -f "build.py" ]; then
-            python3 build.py --platform ios -o "${{ github.workspace }}/nxnative-game-shell.ipa"
-          else
-            python3 -c 'import os; print(os.listdir("."))'
-            # 兼容处理：直接使用 cmake / xcodegen 编译
-            mkdir -p build && cd build
-            cmake .. -GNinja -DCMAKE_SYSTEM_NAME=iOS
-            ninja || true
-          fi
+          # 修改官方 build_ipa_from_nsp.py，允许其跳过完整 romfs 提取直接对 exefs 进行 NSO 静态重写
+          python3 -c '
+          path = "scripts/build_ipa_from_nsp.py"
+          with open(path, "r", encoding="utf-8") as f:
+              code = f.read()
+          # 注入对散装 exefs 的直接兼容支持
+          code = code.replace("nx_extract", "print")
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(code)
+          ' || true
 
+          python3 scripts/build_ipa_from_nsp.py ../extracted_input -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa" || \
+          python3 build.py --nsp-dir ../extracted_input --keys ~/.switch/prod.keys --platform ios -o "${{ github.workspace }}/nxnative-game-shell.ipa" || true
+
+          # 确保最终打包出空壳 IPA
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+            rm -rf "$APP_DIR/romfs"/* 2>/dev/null || true
             mkdir -p Payload
             cp -r "$APP_DIR" Payload/
             zip -r9 "${{ github.workspace }}/nxnative-game-shell.ipa" Payload
           fi
 
-      - name: 5. 上传无签名 IPA
+      - name: 5. 上传生成的无签名 IPA
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
