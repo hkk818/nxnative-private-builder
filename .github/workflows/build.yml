@@ -21,62 +21,67 @@ jobs:
           brew install --cask dotnet-sdk
           python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
 
-      - name: 2. 拉取 nxnative 源码并打印目录结构
+      - name: 2. 拉取 nxnative 源码
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
-          echo "=== 根目录文件列表 ==="
-          ls -la nxnative
-          echo "=== scripts 目录脚本 ==="
-          ls -la nxnative/scripts || true
 
-      - name: 3. 下载并解压 exefs
+      - name: 3. 下载并还原 exefs 与密钥
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
         run: |
-          mkdir -p ~/.switch raw_dl extracted_exefs
+          mkdir -p ~/.switch raw_dl extracted_game/exefs
           if [ -n "$KEYS_B64" ]; then
             echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
           fi
-          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs.zip" --clobber
+          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs_bundle.zip" --clobber
           python3 -c '
           import zipfile, os
-          with zipfile.ZipFile("raw_dl/exefs.zip", "r") as z:
+          with zipfile.ZipFile("raw_dl/exefs_bundle.zip", "r") as z:
               for info in z.infolist():
                   fname = info.filename.replace("\\", "/")
                   if not fname.endswith("/"):
-                      target = os.path.join("extracted_exefs", fname)
+                      target = os.path.join("extracted_game", fname)
                       os.makedirs(os.path.dirname(target), exist_ok=True)
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          if [ -d "extracted_exefs/exefs" ]; then
-            cp -r extracted_exefs/exefs/* nxnative/
+          if [ -d "extracted_game/exefs" ]; then
+            cp -r extracted_game/exefs/* extracted_game/
           fi
+          ls -la extracted_game
 
-      - name: 4. 自动定位编译脚本并打包 IPA
+      - name: 4. 在云端构造标准游戏目录并调用官方脚本编译 IPA
         run: |
           cd nxnative
-          # 自动寻找 scripts 目录下的构建脚本或 python 文件
-          BUILD_SCRIPT=$(find scripts -maxdepth 2 -name "*.py" -o -name "*.sh" | head -n 1)
-          echo "找到构建脚本: $BUILD_SCRIPT"
+          # 检查源码里自带的编译脚本名称
+          ls -la scripts/
           
-          if [ -n "$BUILD_SCRIPT" ]; then
-            python3 "$BUILD_SCRIPT" . -k ~/.switch/prod.keys -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" || \
-            python3 "$BUILD_SCRIPT" || true
-          fi
+          # 直接调用官方的 python 编译脚本，将我们的 extracted_game 传入
+          python3 scripts/build_ipa_from_nsp.py ../extracted_game -k ~/.switch/prod.keys -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" || \
+          python3 scripts/build_ipa_from_nsp.py ../extracted_game/ exefs/ -k ~/.switch/prod.keys -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" || true
 
-          # 兜底：若未生成，尝试直接用 xcodegen 编译
+          # 兜底：如果直接调用失败，利用源码内的主构建逻辑强制生成
           if [ ! -f "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" ]; then
-            xcodegen generate || true
-            xcodebuild -project smbw-mobile.xcodeproj -scheme smbw-mobile -sdk iphoneos -configuration Release CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED=NO || true
+            echo "尝试使用通用 build 逻辑兜底..."
+            python3 -c '
+            import os, sys, subprocess
+            # 直接运行 nxnative 源码中的构建流程
+            for root, dirs, files in os.walk("scripts"):
+                for file in files:
+                    if file.endswith(".py") and "build" in file:
+                        script = os.path.join(root, file)
+                        print(f"Executing found build script: {script}")
+                        subprocess.run(["python3", script, "../extracted_game", "-k", os.path.expanduser("~/.switch/prod.keys"), "-o", "${{ github.workspace }}/final_output/nxnative-game-shell.ipa"])
+            '
           fi
 
-          mkdir -p "${{ github.workspace }}/final_output"
+          # 确保注入 16 Pro 高内存权限并打包
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+            mkdir -p "${{ github.workspace }}/final_output"
             mkdir -p Payload
             cp -r "$APP_DIR" Payload/
             zip -r9 "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" Payload
