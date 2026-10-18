@@ -6,6 +6,10 @@ on:
         description: 'Release Tag'
         required: true
         default: 'v1.0'
+
+permissions:
+  contents: read
+
 jobs:
   build-ipa:
     runs-on: macos-15
@@ -16,9 +20,12 @@ jobs:
           sudo rm -rf /Applications/Xcode_15*.app || true
           sudo rm -rf /Library/Developer/CoreSimulator || true
           brew install cmake ninja python3 p7zip llvm || true
+
       - name: 2. 拉取源码
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
+          ls -la nxnative
+
       - name: 3. 还原密钥
         env:
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
@@ -28,32 +35,53 @@ jobs:
             echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
             cp ~/.switch/prod.keys nxnative/prod.keys
           fi
+
       - name: 4. 下载游戏执行包
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.release_tag }}
         run: |
           mkdir -p raw_dl input_files/exefs input_files/romfs
-          gh release download "$TAG" --repo "${{ github.repository }}" --dir raw_dl
-          cd raw_dl
-          for f in *.zip; do unzip -q -o "$f" -d ../input_files/; done
-          cd ..
+          TAG_NAME="${TAG:-v1.0}"
+          gh release download "$TAG_NAME" --repo "${{ github.repository }}" --dir raw_dl --clobber
+          python3 -c '
+          import zipfile, os, glob
+          for zf in glob.glob("raw_dl/*.zip"):
+              with zipfile.ZipFile(zf, "r") as z:
+                  for info in z.infolist():
+                      fname = info.filename.replace("\\", "/")
+                      if fname.endswith("/"):
+                          os.makedirs(os.path.join("input_files", fname), exist_ok=True)
+                      else:
+                          target = os.path.join("input_files", fname)
+                          os.makedirs(os.path.dirname(target), exist_ok=True)
+                          with open(target, "wb") as out:
+                              out.write(z.read(info.filename))
+          '
           if [ -f "input_files/prod.keys" ]; then
             mkdir -p ~/.switch
             cp input_files/prod.keys ~/.switch/prod.keys
             cp input_files/prod.keys nxnative/prod.keys
           fi
-          if [ -d "input_files/exefs/exefs" ]; then
-            mv input_files/exefs/exefs/* input_files/exefs/
-          fi
+          ls -la input_files input_files/exefs
+
       - name: 5. 编译 IPA 并注入 iPhone 13 内存突破权限
         run: |
           cd nxnative
           chmod +x *.sh scripts/*.sh 2>/dev/null || true
           if [ -f "build_ipa.sh" ]; then
             ./build_ipa.sh ../input_files ~/.switch/prod.keys
-          else
+          elif [ -f "build.sh" ]; then
+            ./build.sh ../input_files ~/.switch/prod.keys
+          elif [ -f "scripts/build_ios.sh" ]; then
+            ./scripts/build_ios.sh ../input_files ~/.switch/prod.keys
+          elif [ -f "build.py" ]; then
             python3 build.py --nsp-dir ../input_files --keys ~/.switch/prod.keys --platform ios
+          else
+            echo "=== nxnative 目录结构与 README 说明 ==="
+            ls -la
+            cat README.md || true
+            exit 1
           fi
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
@@ -64,6 +92,7 @@ jobs:
             cp -r "$APP_DIR" Payload/
             zip -r9 "${{ github.workspace }}/nxnative-game-shell.ipa" Payload
           fi
+
       - name: 6. 上传 IPA
         uses: actions/upload-artifact@v4
         with:
