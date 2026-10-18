@@ -14,76 +14,30 @@ jobs:
   build-ipa:
     runs-on: macos-15
     timeout-minutes: 120
+    env:
+      GAME: "01006BB00C6F0000"
+      DM_GAME: "01006BB00C6F0000"
+      WORK_DIR: "${{ github.workspace }}/zelda_work"
+      DM_ROOT: "${{ github.workspace }}/zelda_work"
+      WORK: "${{ github.workspace }}/zelda_work/tmp"
+      EXEFS_SRC: "${{ github.workspace }}/extracted_bundle/exefs"
+      CTRL_SRC: "${{ github.workspace }}/extracted_bundle/control"
+      MINI_ROMFS: "${{ github.workspace }}/extracted_bundle/mini_romfs"
     steps:
       - name: 1. 安装编译依赖并切换最新 Xcode
         run: |
           LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
-          echo "切换至最新 Xcode: $LATEST_XCODE"
           sudo xcode-select -s "$LATEST_XCODE"
           xcodebuild -version
           xcrun -sdk iphoneos metal -v 2>/dev/null || xcodebuild -downloadComponent MetalToolchain || true
-
           brew install xcodegen zstd spirv-cross
           brew install --cask dotnet-sdk || true
           python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
 
-      - name: 2. 拉取 nxnative 源码
+      - name: 2. 拉取 nxnative 源码并注入 iPhone 挂载补丁
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
-
-      - name: 3. 下载并还原 exefs + control + mini_romfs
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
-        run: |
-          mkdir -p ~/.switch raw_dl extracted_bundle
-          if [ -n "$KEYS_B64" ]; then
-            echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
-          fi
-          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs_ready.zip" --clobber
-          python3 -c '
-          import zipfile, os
-          with zipfile.ZipFile("raw_dl/exefs_ready.zip", "r") as z:
-              for info in z.infolist():
-                  fname = info.filename.replace("\\", "/")
-                  if not fname.endswith("/"):
-                      target = os.path.join("extracted_bundle", fname)
-                      os.makedirs(os.path.dirname(target), exist_ok=True)
-                      with open(target, "wb") as out:
-                          out.write(z.read(info.filename))
-          '
-          ls -la extracted_bundle/exefs
-          ls -la extracted_bundle/mini_romfs/region_common/shader
-
-      - name: 4. 云端 8 核提取着色器 + 静态重写 NSO + 编译 Metal 库 + 打包空壳 IPA
-        run: |
-          set -e
-          WORKSPACE_ROOT="${{ github.workspace }}"
-          BUNDLE_DIR="$WORKSPACE_ROOT/extracted_bundle"
-          EXEFS_SRC="$BUNDLE_DIR/exefs"
-          CTRL_SRC="$BUNDLE_DIR/control"
-          MINI_ROMFS="$BUNDLE_DIR/mini_romfs"
-
-          export GAME="01006BB00C6F0000"
-          export DM_GAME="01006BB00C6F0000"
-          export WORK_DIR="$WORKSPACE_ROOT/zelda_work"
-          export DM_ROOT="$WORK_DIR"
-          export WORK="$WORK_DIR/tmp"
-          export USER=$(whoami)
-
-          mkdir -p "$WORK_DIR/tmp" \
-                   "$WORK_DIR/patched_v131072" \
-                   "$WORK_DIR/shader/pkg" \
-                   "$WORK_DIR/shader/tables" \
-                   "$WORK_DIR/shader/cache" \
-                   "$WORK_DIR/shader/ios" \
-                   "$WORK_DIR/data/v131072/RomFS/region_common/shader" \
-                   "$WORK_DIR/data/v0" \
-                   "$WORKSPACE_ROOT/final_output"
-
-          cd "$WORKSPACE_ROOT/nxnative"
-
-          # 4.1 注入空壳 IPA 自动从手机“文件”App (Documents/romfs) 挂载 RomFS 的支持
+          cd nxnative
           python3 -c '
           p = "dm/host/hle_fs.c"
           s = open(p, "r", encoding="utf-8").read()
@@ -99,19 +53,42 @@ jobs:
           }
           const char *v = getenv(var);
           if (v) return v;"""
-          assert old in s, "envdir pattern not found in hle_fs.c"
+          assert old in s
           open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
-          print("Successfully patched hle_fs.c to auto-mount Documents/romfs on iPhone!")
           '
 
-          # 4.2 静态重写 4 个模块 (main, subsdk0, subsdk1, sdk)
-          echo "=== [Step 4.2] 正在执行 patch_nso.py 静态重写 4 个模块 ==="
+      - name: 3. 下载并解压 121MB 精简构建包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
+        run: |
+          mkdir -p ~/.switch raw_dl extracted_bundle "$WORK_DIR/tmp" "$WORK_DIR/patched_v131072" "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/tables" "$WORK_DIR/shader/cache" "$WORK_DIR/shader/ios" "$WORK_DIR/data/v131072/RomFS/region_common/shader" "$WORK_DIR/data/v0" "${{ github.workspace }}/final_output"
+          if [ -n "$KEYS_B64" ]; then
+            echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
+          fi
+          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs_ready.zip" --clobber
+          python3 -c '
+          import zipfile, os
+          with zipfile.ZipFile("raw_dl/exefs_ready.zip", "r") as z:
+              for info in z.infolist():
+                  fname = info.filename.replace("\\", "/")
+                  if not fname.endswith("/"):
+                      target = os.path.join("extracted_bundle", fname)
+                      os.makedirs(os.path.dirname(target), exist_ok=True)
+                      with open(target, "wb") as out:
+                          out.write(z.read(info.filename))
+          '
+
+      - name: 4. 静态重写 4 个 NSO 模块 (main, subsdk0, subsdk1, sdk)
+        run: |
+          cd "${{ github.workspace }}/nxnative"
           for mod in main subsdk0 subsdk1 sdk; do
             DM_RULESET=native python3 dm/tools/patch_nso.py "$EXEFS_SRC/$mod" "$WORK_DIR/patched_v131072" "$mod"
           done
 
-          # 4.3 在云端 macOS 原生多进程运行 shader_split.py 提取着色器包
-          echo "=== [Step 4.3] 正在云端并行运行 shader_split.py 拆分着色器 ==="
+      - name: 5. 并行拆分 9696 个着色器并同步映射表 (修复越界)
+        run: |
+          cd "${{ github.workspace }}/nxnative"
           python3 dm/gfx/tools/shader_split.py \
             "$MINI_ROMFS" \
             "$EXEFS_SRC/main" \
@@ -120,20 +97,74 @@ jobs:
             "$WORK_DIR/shader/tables/shader_facts.tsv" \
             "$WORK_DIR/shader/tables/shader_pairs.tsv"
 
-          # 4.4 对齐翻译链锁文件并编译 iOS Metal 着色器库 (*_b.metallib)
-          echo "=== [Step 4.4] 正在编译 iOS Metal 着色器库 (dmsh_build.py，约需 10~25 分钟) ==="
-          XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate"
-          chmod +x "$XLATE"
+          # 关键修复：将实际拆出的 shader_map.tsv 和 shader_pairs.tsv 同步到游戏档案目录，彻底解决 IndexError
+          cp -f "$WORK_DIR/shader/tables/shader_map.tsv" dm/games/01006BB00C6F0000/shader_map.tsv
+          cp -f "$WORK_DIR/shader/tables/shader_pairs.tsv" dm/games/01006BB00C6F0000/shader_pairs.tsv
+
+          # 优化 dmsh_build.py：跳过无用的 macOS 版 metallib 编译，仅编译 iOS 版 metallib（速度提升一倍）
+          python3 -c '
+          p = "dm/gfx/tools/dmsh_build.py"
+          s = open(p, "r", encoding="utf-8").read()
+          s = s.replace("subprocess.run([*MAC_METAL, fmsl, \x27-o\x27, fair], check=True)", "open(fair, \x27wb\x27).close()")
+          s = s.replace("subprocess.run([\x27xcrun\x27, \x27-sdk\x27, \x27macosx\x27, \x27metallib\x27, fair, \x27-o\x27, tmp_flib], check=True)", "open(tmp_flib, \x27wb\x27).close()")
+          s = s.replace("subprocess.run([*MAC_METAL, msl, \x27-o\x27, air], check=True)", "open(air, \x27wb\x27).close()")
+          s = s.replace("subprocess.run([\x27xcrun\x27, \x27-sdk\x27, \x27macosx\x27, \x27metallib\x27, air, \x27-o\x27, tmp_lib], check=True)", "open(tmp_lib, \x27wb\x27).close()")
+          open(p, "w", encoding="utf-8").write(s)
+          '
+
+          chmod +x dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
           python3 dm/gfx/tools/dmsh_chain.py --update-lock
           python3 dm/gfx/tools/dmsh_chain.py --header
 
-          MAIN="$EXEFS_SRC/main" \
-          XLATE="$XLATE" \
-          IOSOUT="$WORK_DIR/shader/ios" \
-          python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
+          # 生成 4 个批次的着色器 Key 列表文件，以便分 4 步展示实时进度
+          python3 -c '
+          pairs = set()
+          for ln in open("dm/games/01006BB00C6F0000/shader_pairs.tsv"):
+              if ln.strip() and not ln.startswith("#"):
+                  pairs.add(ln.split()[0])
+          all_keys = []
+          for ln in open("dm/games/01006BB00C6F0000/shader_map.tsv"):
+              c = ln.rstrip("\n").split("\t")
+              if len(c) > 4 and (c[0].endswith(".bin") or c[0].startswith("main.rodata@")):
+                  all_keys.append(c[3])
+          non_paired = sorted(set(all_keys) - pairs)
+          paired = sorted(set(all_keys) & pairs)
+          h1 = len(non_paired) // 2
+          h2 = len(paired) // 2
+          batches = [non_paired[:h1], non_paired[h1:], paired[:h2], paired[h2:]]
+          for i, b in enumerate(batches, 1):
+              open(f"batch_{i}.txt", "w").write("\n".join(b) + "\n")
+              print(f"Batch {i}: {len(b)} shaders")
+          '
 
-          # 4.5 准备空壳 RomFS 标志文件、control.nacp 与游戏图标，调用官方 build_ipa.sh
-          echo "=== [Step 4.5] 正在生成 Xcode 工程并编译打包 IPA (build_ipa.sh) ==="
+      - name: 6. 编译 iOS Metal 着色器库 [第 1/4 批 - 像素与计算前半]
+        run: |
+          cd "${{ github.workspace }}/nxnative"
+          MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
+            xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_1.txt
+
+      - name: 7. 编译 iOS Metal 着色器库 [第 2/4 批 - 像素与计算后半]
+        run: |
+          cd "${{ github.workspace }}/nxnative"
+          MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
+            xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_2.txt
+
+      - name: 8. 编译 iOS Metal 着色器库 [第 3/4 批 - 顶点着色器前半]
+        run: |
+          cd "${{ github.workspace }}/nxnative"
+          MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
+            xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_3.txt
+
+      - name: 9. 编译 iOS Metal 着色器库 [第 4/4 批 - 顶点着色器后半]
+        run: |
+          cd "${{ github.workspace }}/nxnative"
+          MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
+            xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_4.txt
+
+      - name: 10. 生成 Xcode 工程并打包 iPhone 16 Pro 空壳 IPA
+        run: |
+          cd "${{ github.workspace }}/nxnative"
+          export USER=$(whoami)
           touch "$WORK_DIR/data/v131072/RomFS/region_common/shader/postprocess.bfsha"
           cp -f "$EXEFS_SRC/control.nacp" "$WORK_DIR/data/v0/control.nacp"
           cp -f "$EXEFS_SRC/control.nacp" "$WORK_DIR/data/v131072/control.nacp"
@@ -147,7 +178,7 @@ jobs:
             ICON_FILE="$WORK_DIR/data/v131072/icon.jpg"
           fi
 
-          OUT_IPA="$WORKSPACE_ROOT/final_output/ZeldaLinksAwakening-shell.ipa"
+          OUT_IPA="${{ github.workspace }}/final_output/ZeldaLinksAwakening-shell.ipa"
           chmod +x dm/ios/tools/build_ipa.sh
 
           GAME="01006BB00C6F0000" \
@@ -159,9 +190,9 @@ jobs:
           AOC="" \
           bash dm/ios/tools/build_ipa.sh "$OUT_IPA"
 
-          ls -lh "$WORKSPACE_ROOT/final_output"
+          ls -lh "${{ github.workspace }}/final_output"
 
-      - name: 5. 上传生成的无签名 IPA
+      - name: 11. 上传生成的无签名 IPA
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
