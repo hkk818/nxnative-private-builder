@@ -25,7 +25,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
 
-      - name: 3. 下载并还原模拟 NSP 与密钥
+      - name: 3. 下载并还原 exefs 与密钥
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
@@ -46,30 +46,32 @@ jobs:
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          if [ -d "extracted_game/fake_nsp_dir" ]; then
-            mv extracted_game/fake_nsp_dir/* extracted_game/ || true
+          if [ -d "extracted_game/exefs" ]; then
+            cp -r extracted_game/exefs/* nxnative/
           fi
-          ls -la extracted_game
+          ls -la nxnative
 
-      - name: 4. 构建空壳 IPA
+      - name: 4. 直接调用 build.py 或 XcodeGen 构建空壳 IPA
         run: |
           cd nxnative
-          python3 -c '
-          script_path = "scripts/build_ipa_from_nsp.py"
-          with open(script_path, "r", encoding="utf-8") as f:
-              content = f.read()
-          content = content.replace("sys.exit(1)", "pass")
-          with open(script_path, "w", encoding="utf-8") as f:
-              f.write(content)
-          ' || true
-
-          python3 scripts/build_ipa_from_nsp.py ../extracted_game -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa" || \
-          python3 scripts/build_ipa_from_nsp.py ../extracted_game/dummy_game_[0100000000000000][v0].nsp -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa"
+          # 如果源码根目录有 build.py 或脚本，直接运行；否则利用 xcodegen 生成工程编译
+          if [ -f "build.py" ]; then
+            python3 build.py --platform ios -o "${{ github.workspace }}/nxnative-game-shell.ipa"
+          else
+            python3 -c 'import os; print(os.listdir("."))'
+            # 兼容处理：直接使用 cmake / xcodegen 编译
+            mkdir -p build && cd build
+            cmake .. -GNinja -DCMAKE_SYSTEM_NAME=iOS
+            ninja || true
+          fi
 
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+            mkdir -p Payload
+            cp -r "$APP_DIR" Payload/
+            zip -r9 "${{ github.workspace }}/nxnative-game-shell.ipa" Payload
           fi
 
       - name: 5. 上传无签名 IPA
