@@ -46,17 +46,14 @@ jobs:
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          ls -la extracted_input
 
       - name: 4. 动态 Hook 官方脚本并生成空壳 IPA
         run: |
           cd nxnative
-          # 修改官方 build_ipa_from_nsp.py，允许其跳过完整 romfs 提取直接对 exefs 进行 NSO 静态重写
           python3 -c '
           path = "scripts/build_ipa_from_nsp.py"
           with open(path, "r", encoding="utf-8") as f:
               code = f.read()
-          # 注入对散装 exefs 的直接兼容支持
           code = code.replace("nx_extract", "print")
           with open(path, "w", encoding="utf-8") as f:
               f.write(code)
@@ -65,23 +62,15 @@ jobs:
           python3 scripts/build_ipa_from_nsp.py ../extracted_input -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa" || \
           python3 build.py --nsp-dir ../extracted_input --keys ~/.switch/prod.keys --platform ios -o "${{ github.workspace }}/nxnative-game-shell.ipa" || true
 
-          # 确保最终打包出空壳 IPA
-          APP_DIR=$(find . -type d -name "*.app" | head -n 1)
-          if [ -n "$APP_DIR" ]; then
-            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-            rm -rf "$APP_DIR/romfs"/* 2>/dev/null || true
-            mkdir -p Payload
-            cp -r "$APP_DIR" Payload/
-            zip -r9 "${{ github.workspace }}/nxnative-game-shell.ipa" Payload
-          fi
+          # 强制在全目录搜索任意生成的 .ipa 并集中拷贝到工作空间根目录
+          mkdir -p "${{ github.workspace }}/final_output"
+          find . -name "*.ipa" -exec cp {} "${{ github.workspace }}/final_output/" \;
+          ls -la "${{ github.workspace }}/final_output"
 
       - name: 5. 上传生成的无签名 IPA
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
-          path: |
-            ${{ github.workspace }}/*.ipa
-            nxnative/**/*.ipa
+          path: ${{ github.workspace }}/final_output/*.ipa
           if-no-files-found: error
           retention-days: 3
