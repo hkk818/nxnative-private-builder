@@ -15,92 +15,59 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     steps:
-      - name: 1. 清理磁盘并安装依赖
+      - name: 1. 安装编译依赖
         run: |
-          sudo rm -rf /Applications/Xcode_15*.app || true
-          sudo rm -rf /Library/Developer/CoreSimulator || true
-          brew install cmake ninja python3 p7zip llvm || true
+          brew install xcodegen zstd spirv-cross
+          brew install --cask dotnet-sdk
+          python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
 
-      - name: 2. 拉取源码
+      - name: 2. 拉取 nxnative 源码
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
-          ls -la nxnative
 
-      - name: 3. 还原密钥
-        env:
-          KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
-        run: |
-          mkdir -p ~/.switch
-          if [ -n "$KEYS_B64" ]; then
-            echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
-            cp ~/.switch/prod.keys nxnative/prod.keys
-          fi
-
-      - name: 4. 下载游戏执行包
+      - name: 3. 下载并还原 exefs 与密钥
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.release_tag }}
+          KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
         run: |
-          mkdir -p raw_dl input_files/exefs input_files/romfs
-          TAG_NAME="${TAG:-v1.0}"
-          gh release download "$TAG_NAME" --repo "${{ github.repository }}" --dir raw_dl --clobber
+          mkdir -p ~/.switch raw_dl extracted_game/exefs extracted_game/romfs
+          if [ -n "$KEYS_B64" ]; then
+            echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
+          }
+          gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs.zip" --clobber
           python3 -c '
-          import zipfile, os, glob
-          for zf in glob.glob("raw_dl/*.zip"):
-              with zipfile.ZipFile(zf, "r") as z:
-                  for info in z.infolist():
-                      fname = info.filename.replace("\\", "/")
-                      if fname.endswith("/"):
-                          os.makedirs(os.path.join("input_files", fname), exist_ok=True)
-                      else:
-                          target = os.path.join("input_files", fname)
-                          os.makedirs(os.path.dirname(target), exist_ok=True)
-                          with open(target, "wb") as out:
-                              out.write(z.read(info.filename))
+          import zipfile, os
+          with zipfile.ZipFile("raw_dl/exefs.zip", "r") as z:
+              for info in z.infolist():
+                  fname = info.filename.replace("\\", "/")
+                  if not fname.endswith("/"):
+                      target = os.path.join("extracted_game", fname)
+                      os.makedirs(os.path.dirname(target), exist_ok=True)
+                      with open(target, "wb") as out:
+                          out.write(z.read(info.filename))
           '
-          if [ -f "input_files/prod.keys" ]; then
-            mkdir -p ~/.switch
-            cp input_files/prod.keys ~/.switch/prod.keys
-            cp input_files/prod.keys nxnative/prod.keys
-          fi
-          ls -la input_files input_files/exefs
+          ls -la extracted_game extracted_game/exefs
 
-      - name: 5. 编译 IPA 并注入 iPhone 13 内存突破权限
+      - name: 4. 调用官方脚本构建 iPhone 16 Pro 专用的空壳 IPA
         run: |
           cd nxnative
-          chmod +x *.sh scripts/*.sh 2>/dev/null || true
-          if [ -f "build_ipa.sh" ]; then
-            ./build_ipa.sh ../input_files ~/.switch/prod.keys
-          elif [ -f "build.sh" ]; then
-            ./build.sh ../input_files ~/.switch/prod.keys
-          elif [ -f "scripts/build_ios.sh" ]; then
-            ./scripts/build_ios.sh ../input_files ~/.switch/prod.keys
-          elif [ -f "build.py" ]; then
-            python3 build.py --nsp-dir ../input_files --keys ~/.switch/prod.keys --platform ios
-          else
-            echo "=== nxnative 目录结构与 README 说明 ==="
-            ls -la
-            cat README.md || true
-            exit 1
-          fi
+          # 利用官方 python 脚本，将本地提取好的 exefs 作为输入源直接编译
+          python3 scripts/build_ipa_from_nsp.py ../extracted_game -k ~/.switch/prod.keys -o "${{ github.workspace }}/nxnative-game-shell.ipa" || \
+          python3 build.py --nsp-dir ../extracted_game --keys ~/.switch/prod.keys --platform ios -o "${{ github.workspace }}/nxnative-game-shell.ipa"
+
+          # 确保注入 16 Pro 高内存权限
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-            rm -rf "$APP_DIR/romfs"/* 2>/dev/null || true
-            mkdir -p Payload
-            cp -r "$APP_DIR" Payload/
-            zip -r9 "${{ github.workspace }}/nxnative-game-shell.ipa" Payload
           fi
 
-      - name: 6. 上传 IPA
+      - name: 5. 上传生成的无签名空壳 IPA
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
           path: |
-            nxnative-game-shell.ipa
+            ${{ github.workspace }}/*.ipa
             nxnative/**/*.ipa
-            nxnative/build/*.ipa
-            *.ipa
           if-no-files-found: error
           retention-days: 3
