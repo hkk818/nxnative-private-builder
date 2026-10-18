@@ -15,31 +15,30 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     steps:
-      - name: 1. 安装编译依赖
+      - name: 1. 安装编译依赖并切换最新 Xcode
         run: |
-          brew install xcodegen zstd spirv-cross llvm
-          brew install --cask dotnet-sdk || true
-          python3 -m pip install --break-system-packages lz4 capstone unicorn fonttools pillow numpy pycryptodome || python3 -m pip install lz4 capstone unicorn fonttools pillow numpy pycryptodome
+          LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
+          echo "切换至最新 Xcode: $LATEST_XCODE"
+          sudo xcode-select -s "$LATEST_XCODE"
+          xcodebuild -version
+          xcrun -sdk iphoneos metal -v 2>/dev/null || xcodebuild -downloadComponent MetalToolchain || true
 
-      - name: 2. 拉取 nxnative 源码并查看结构
+          brew install xcodegen zstd spirv-cross
+          brew install --cask dotnet-sdk || true
+          python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
+
+      - name: 2. 拉取 nxnative 源码
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
-          echo "=== nxnative 目录树 ==="
-          find nxnative -maxdepth 3 -not -path '*/.*'
-          if [ -f "nxnative/README.md" ]; then
-            echo "=== nxnative README.md ==="
-            cat nxnative/README.md
-          fi
 
-      - name: 3. 下载并还原本地已解包的 exefs 与 control
+      - name: 3. 下载并还原 exefs + control + mini_romfs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
         run: |
-          mkdir -p ~/.switch raw_dl extracted_exefs
+          mkdir -p ~/.switch raw_dl extracted_bundle
           if [ -n "$KEYS_B64" ]; then
             echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
-            cp ~/.switch/prod.keys nxnative/prod.keys
           fi
           gh release download "v1.0" --repo "${{ github.repository }}" --dir raw_dl --pattern "exefs_ready.zip" --clobber
           python3 -c '
@@ -48,94 +47,119 @@ jobs:
               for info in z.infolist():
                   fname = info.filename.replace("\\", "/")
                   if not fname.endswith("/"):
-                      target = os.path.join("extracted_exefs", fname)
+                      target = os.path.join("extracted_bundle", fname)
                       os.makedirs(os.path.dirname(target), exist_ok=True)
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          ls -la extracted_exefs/exefs
-          ls -la extracted_exefs/control || true
+          ls -la extracted_bundle/exefs
+          ls -la extracted_bundle/mini_romfs/region_common/shader
 
-      - name: 4. 执行静态重编译并生成 iPhone 16 Pro 专用 IPA
+      - name: 4. 云端 8 核提取着色器 + 静态重写 NSO + 编译 Metal 库 + 打包空壳 IPA
         run: |
-          set -x
+          set -e
           WORKSPACE_ROOT="${{ github.workspace }}"
-          EXEFS_SRC="$WORKSPACE_ROOT/extracted_exefs/exefs"
-          CTRL_SRC="$WORKSPACE_ROOT/extracted_exefs/control"
+          BUNDLE_DIR="$WORKSPACE_ROOT/extracted_bundle"
+          EXEFS_SRC="$BUNDLE_DIR/exefs"
+          CTRL_SRC="$BUNDLE_DIR/control"
+          MINI_ROMFS="$BUNDLE_DIR/mini_romfs"
+
+          export GAME="01006BB00C6F0000"
+          export DM_GAME="01006BB00C6F0000"
+          export WORK_DIR="$WORKSPACE_ROOT/zelda_work"
+          export DM_ROOT="$WORK_DIR"
+          export WORK="$WORK_DIR/tmp"
+          export USER=$(whoami)
+
+          mkdir -p "$WORK_DIR/tmp" \
+                   "$WORK_DIR/patched_v131072" \
+                   "$WORK_DIR/shader/pkg" \
+                   "$WORK_DIR/shader/tables" \
+                   "$WORK_DIR/shader/cache" \
+                   "$WORK_DIR/shader/ios" \
+                   "$WORK_DIR/data/v131072/RomFS/region_common/shader" \
+                   "$WORK_DIR/data/v0" \
+                   "$WORKSPACE_ROOT/final_output"
+
           cd "$WORKSPACE_ROOT/nxnative"
 
-          echo "=== 扫描 nxnative 内部构建脚本与配置文件 ==="
-          find . -maxdepth 4 \( -name "*.yml" -o -name "*.sh" -o -name "*.py" -o -name "Makefile" -o -name "CMakeLists.txt" \)
+          # 4.1 注入空壳 IPA 自动从手机“文件”App (Documents/romfs) 挂载 RomFS 的支持
+          python3 -c '
+          p = "dm/host/hle_fs.c"
+          s = open(p, "r", encoding="utf-8").read()
+          old = "const char *v = getenv(var);\n    if (v) return v;"
+          new = """if (!strcmp(var, "DM_ROMFS")) {
+              const char *h = getenv("HOME");
+              if (h) {
+                  snprintf(buf, n, "%s/Documents/romfs/region_common", h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents/romfs", h); return buf; }
+                  snprintf(buf, n, "%s/Documents/region_common", h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents", h); return buf; }
+              }
+          }
+          const char *v = getenv(var);
+          if (v) return v;"""
+          assert old in s, "envdir pattern not found in hle_fs.c"
+          open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
+          print("Successfully patched hle_fs.c to auto-mount Documents/romfs on iPhone!")
+          '
 
-          # 准备常见目录映射
-          mkdir -p ExeFS exefs control
-          cp -f "$EXEFS_SRC"/* ExeFS/ 2>/dev/null || true
-          cp -f "$EXEFS_SRC"/* exefs/ 2>/dev/null || true
-          cp -f "$EXEFS_SRC"/* ./ 2>/dev/null || true
-          if [ -d "$CTRL_SRC" ]; then
-            cp -f "$CTRL_SRC"/* control/ 2>/dev/null || true
-            cp -f "$CTRL_SRC"/* ./ 2>/dev/null || true
+          # 4.2 静态重写 4 个模块 (main, subsdk0, subsdk1, sdk)
+          echo "=== [Step 4.2] 正在执行 patch_nso.py 静态重写 4 个模块 ==="
+          for mod in main subsdk0 subsdk1 sdk; do
+            DM_RULESET=native python3 dm/tools/patch_nso.py "$EXEFS_SRC/$mod" "$WORK_DIR/patched_v131072" "$mod"
+          done
+
+          # 4.3 在云端 macOS 原生多进程运行 shader_split.py 提取着色器包
+          echo "=== [Step 4.3] 正在云端并行运行 shader_split.py 拆分着色器 ==="
+          python3 dm/gfx/tools/shader_split.py \
+            "$MINI_ROMFS" \
+            "$EXEFS_SRC/main" \
+            "$WORK_DIR/shader/pkg" \
+            "$WORK_DIR/shader/tables/shader_map.tsv" \
+            "$WORK_DIR/shader/tables/shader_facts.tsv" \
+            "$WORK_DIR/shader/tables/shader_pairs.tsv"
+
+          # 4.4 对齐翻译链锁文件并编译 iOS Metal 着色器库 (*_b.metallib)
+          echo "=== [Step 4.4] 正在编译 iOS Metal 着色器库 (dmsh_build.py，约需 10~25 分钟) ==="
+          XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate"
+          chmod +x "$XLATE"
+          python3 dm/gfx/tools/dmsh_chain.py --update-lock
+          python3 dm/gfx/tools/dmsh_chain.py --header
+
+          MAIN="$EXEFS_SRC/main" \
+          XLATE="$XLATE" \
+          IOSOUT="$WORK_DIR/shader/ios" \
+          python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
+
+          # 4.5 准备空壳 RomFS 标志文件、control.nacp 与游戏图标，调用官方 build_ipa.sh
+          echo "=== [Step 4.5] 正在生成 Xcode 工程并编译打包 IPA (build_ipa.sh) ==="
+          touch "$WORK_DIR/data/v131072/RomFS/region_common/shader/postprocess.bfsha"
+          cp -f "$EXEFS_SRC/control.nacp" "$WORK_DIR/data/v0/control.nacp"
+          cp -f "$EXEFS_SRC/control.nacp" "$WORK_DIR/data/v131072/control.nacp"
+
+          ICON_FILE=""
+          if [ -f "$CTRL_SRC/icon_SimplifiedChinese.dat" ]; then
+            cp -f "$CTRL_SRC/icon_SimplifiedChinese.dat" "$WORK_DIR/data/v131072/icon.jpg"
+            ICON_FILE="$WORK_DIR/data/v131072/icon.jpg"
+          elif [ -f "$CTRL_SRC/icon_AmericanEnglish.dat" ]; then
+            cp -f "$CTRL_SRC/icon_AmericanEnglish.dat" "$WORK_DIR/data/v131072/icon.jpg"
+            ICON_FILE="$WORK_DIR/data/v131072/icon.jpg"
           fi
 
-          # 如果存在 setup.sh，打印其用法并尝试运行
-          if [ -f "./setup.sh" ]; then
-            head -n 60 ./setup.sh
-            chmod +x ./setup.sh
-            ./setup.sh || true
-          fi
+          OUT_IPA="$WORKSPACE_ROOT/final_output/ZeldaLinksAwakening-shell.ipa"
+          chmod +x dm/ios/tools/build_ipa.sh
 
-          # 自动查找 project.yml 所在目录
-          PROJ_YML=$(find . -name "project.yml" | head -n 1)
-          if [ -n "$PROJ_YML" ]; then
-            PROJ_DIR=$(dirname "$PROJ_YML")
-            echo "进入 XcodeGen 目录: $PROJ_DIR"
-            cd "$PROJ_DIR"
+          GAME="01006BB00C6F0000" \
+          W="$WORK_DIR" \
+          PATCHED="$WORK_DIR/patched_v131072" \
+          ROMFS="$WORK_DIR/data/v131072/RomFS" \
+          MSL_IOS="$WORK_DIR/shader/ios" \
+          DM_ICON="$ICON_FILE" \
+          AOC="" \
+          bash dm/ios/tools/build_ipa.sh "$OUT_IPA"
 
-            if [ -f "./run.sh" ]; then
-              head -n 60 ./run.sh
-              chmod +x ./run.sh
-              DM_FREE_ACCOUNT=1 ./run.sh build || true
-            fi
-
-            if [ -f "tools/gen_build.py" ] && [ ! -d "Gen" ]; then
-              python3 tools/gen_build.py || true
-            fi
-
-            xcodegen generate
-            XCODEPROJ=$(find . -maxdepth 2 -name "*.xcodeproj" | head -n 1)
-            SCHEME=$(xcodebuild -project "$XCODEPROJ" -list | awk '/Schemes:/{flag=1;next} flag && NF{print $1; exit}')
-            xcodebuild -project "$XCODEPROJ" \
-              -scheme "$SCHEME" \
-              -sdk iphoneos \
-              -configuration Release \
-              -derivedDataPath "$WORKSPACE_ROOT/DerivedData" \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGN_ENTITLEMENTS="" \
-              CODE_SIGNING_ALLOWED=NO
-          else
-            echo "仓库中未直接包含静态 project.yml，打印主入口脚本内容以供检查："
-            for f in $(find . -maxdepth 3 \( -name "*.sh" -o -name "*.py" \) | head -n 10); do
-              echo "--- FILE: $f ---"
-              head -n 80 "$f"
-            done
-            exit 1
-          fi
-
-          APP_DIR=$(find "$WORKSPACE_ROOT" -type d -name "*.app" | head -n 1)
-          if [ -z "$APP_DIR" ]; then
-            echo "错误: 未能生成 .app 目录！"
-            exit 1
-          fi
-
-          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-
-          mkdir -p "$WORKSPACE_ROOT/final_output" "$WORKSPACE_ROOT/Payload"
-          cp -r "$APP_DIR" "$WORKSPACE_ROOT/Payload/"
-          cd "$WORKSPACE_ROOT"
-          zip -r9 "$WORKSPACE_ROOT/final_output/nxnative-game-shell.ipa" Payload
-          ls -la "$WORKSPACE_ROOT/final_output"
+          ls -lh "$WORKSPACE_ROOT/final_output"
 
       - name: 5. 上传生成的无签名 IPA
         uses: actions/upload-artifact@v4
