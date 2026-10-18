@@ -1,4 +1,4 @@
-﻿name: Build nxnative IPA
+name: Build nxnative IPA
 on:
   workflow_dispatch:
     inputs:
@@ -17,15 +17,21 @@ jobs:
     steps:
       - name: 1. 安装编译依赖
         run: |
-          brew install xcodegen zstd spirv-cross
-          brew install --cask dotnet-sdk
-          python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
+          brew install xcodegen zstd spirv-cross llvm
+          brew install --cask dotnet-sdk || true
+          python3 -m pip install --break-system-packages lz4 capstone unicorn fonttools pillow numpy pycryptodome || python3 -m pip install lz4 capstone unicorn fonttools pillow numpy pycryptodome
 
-      - name: 2. 拉取 nxnative 源码
+      - name: 2. 拉取 nxnative 源码并查看结构
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
+          echo "=== nxnative 目录树 ==="
+          find nxnative -maxdepth 3 -not -path '*/.*'
+          if [ -f "nxnative/README.md" ]; then
+            echo "=== nxnative README.md ==="
+            cat nxnative/README.md
+          fi
 
-      - name: 3. 下载并还原本地已解包的 exefs 代码与密钥
+      - name: 3. 下载并还原本地已解包的 exefs 与 control
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
@@ -47,35 +53,89 @@ jobs:
                       with open(target, "wb") as out:
                           out.write(z.read(info.filename))
           '
-          # 将解包好的 exefs 直接覆盖进源码的工作目录
-          if [ -d "extracted_exefs/exefs" ]; then
-            cp -r extracted_exefs/exefs/* nxnative/
-          fi
-          ls -la nxnative
+          ls -la extracted_exefs/exefs
+          ls -la extracted_exefs/control || true
 
-      - name: 4. 执行静态重编译并生成 iPhone 16 Pro 专用的空壳 IPA
+      - name: 4. 执行静态重编译并生成 iPhone 16 Pro 专用 IPA
         run: |
-          cd nxnative
-          # 利用 nxnative 源码内置的编译入口直接将 exefs 转换为 Metal 架构并打包
-          # 如果源码根目录有 build.py 或类似编译脚本，直接调用；否则运行 xcodegen
-          if [ -f "build.py" ]; then
-            python3 build.py --platform ios -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa"
-          else
-            xcodegen generate
-            xcodebuild -project smbw-mobile.xcodeproj -scheme smbw-mobile -sdk iphoneos -configuration Release CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED=NO
+          set -x
+          WORKSPACE_ROOT="${{ github.workspace }}"
+          EXEFS_SRC="$WORKSPACE_ROOT/extracted_exefs/exefs"
+          CTRL_SRC="$WORKSPACE_ROOT/extracted_exefs/control"
+          cd "$WORKSPACE_ROOT/nxnative"
+
+          echo "=== 扫描 nxnative 内部构建脚本与配置文件 ==="
+          find . -maxdepth 4 \( -name "*.yml" -o -name "*.sh" -o -name "*.py" -o -name "Makefile" -o -name "CMakeLists.txt" \)
+
+          # 准备常见目录映射
+          mkdir -p ExeFS exefs control
+          cp -f "$EXEFS_SRC"/* ExeFS/ 2>/dev/null || true
+          cp -f "$EXEFS_SRC"/* exefs/ 2>/dev/null || true
+          cp -f "$EXEFS_SRC"/* ./ 2>/dev/null || true
+          if [ -d "$CTRL_SRC" ]; then
+            cp -f "$CTRL_SRC"/* control/ 2>/dev/null || true
+            cp -f "$CTRL_SRC"/* ./ 2>/dev/null || true
           fi
 
-          # 确保注入 16 Pro 高内存权限 (increased-memory-limit)
-          APP_DIR=$(find . -type d -name "*.app" | head -n 1)
-          if [ -n "$APP_DIR" ]; then
-            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
-            mkdir -p "${{ github.workspace }}/final_output"
-            mkdir -p Payload
-            cp -r "$APP_DIR" Payload/
-            zip -r9 "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" Payload
+          # 如果存在 setup.sh，打印其用法并尝试运行
+          if [ -f "./setup.sh" ]; then
+            head -n 60 ./setup.sh
+            chmod +x ./setup.sh
+            ./setup.sh || true
           fi
-          ls -la "${{ github.workspace }}/final_output"
+
+          # 自动查找 project.yml 所在目录
+          PROJ_YML=$(find . -name "project.yml" | head -n 1)
+          if [ -n "$PROJ_YML" ]; then
+            PROJ_DIR=$(dirname "$PROJ_YML")
+            echo "进入 XcodeGen 目录: $PROJ_DIR"
+            cd "$PROJ_DIR"
+
+            if [ -f "./run.sh" ]; then
+              head -n 60 ./run.sh
+              chmod +x ./run.sh
+              DM_FREE_ACCOUNT=1 ./run.sh build || true
+            fi
+
+            if [ -f "tools/gen_build.py" ] && [ ! -d "Gen" ]; then
+              python3 tools/gen_build.py || true
+            fi
+
+            xcodegen generate
+            XCODEPROJ=$(find . -maxdepth 2 -name "*.xcodeproj" | head -n 1)
+            SCHEME=$(xcodebuild -project "$XCODEPROJ" -list | awk '/Schemes:/{flag=1;next} flag && NF{print $1; exit}')
+            xcodebuild -project "$XCODEPROJ" \
+              -scheme "$SCHEME" \
+              -sdk iphoneos \
+              -configuration Release \
+              -derivedDataPath "$WORKSPACE_ROOT/DerivedData" \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_ENTITLEMENTS="" \
+              CODE_SIGNING_ALLOWED=NO
+          else
+            echo "仓库中未直接包含静态 project.yml，打印主入口脚本内容以供检查："
+            for f in $(find . -maxdepth 3 \( -name "*.sh" -o -name "*.py" \) | head -n 10); do
+              echo "--- FILE: $f ---"
+              head -n 80 "$f"
+            done
+            exit 1
+          fi
+
+          APP_DIR=$(find "$WORKSPACE_ROOT" -type d -name "*.app" | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+            echo "错误: 未能生成 .app 目录！"
+            exit 1
+          fi
+
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+
+          mkdir -p "$WORKSPACE_ROOT/final_output" "$WORKSPACE_ROOT/Payload"
+          cp -r "$APP_DIR" "$WORKSPACE_ROOT/Payload/"
+          cd "$WORKSPACE_ROOT"
+          zip -r9 "$WORKSPACE_ROOT/final_output/nxnative-game-shell.ipa" Payload
+          ls -la "$WORKSPACE_ROOT/final_output"
 
       - name: 5. 上传生成的无签名 IPA
         uses: actions/upload-artifact@v4
