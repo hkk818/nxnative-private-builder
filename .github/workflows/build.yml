@@ -21,9 +21,13 @@ jobs:
           brew install --cask dotnet-sdk
           python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
 
-      - name: 2. 拉取 nxnative 源码
+      - name: 2. 拉取 nxnative 源码并打印目录结构
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
+          echo "=== 根目录文件列表 ==="
+          ls -la nxnative
+          echo "=== scripts 目录脚本 ==="
+          ls -la nxnative/scripts || true
 
       - name: 3. 下载并解压 exefs
         env:
@@ -49,24 +53,25 @@ jobs:
           if [ -d "extracted_exefs/exefs" ]; then
             cp -r extracted_exefs/exefs/* nxnative/
           fi
-          ls -la nxnative
 
-      - name: 4. 直接生成 IPA 安装包
+      - name: 4. 自动定位编译脚本并打包 IPA
         run: |
           cd nxnative
-          # 运行官方提供的快速打包辅助脚本或直接生成工程
-          python3 -c '
-          import os, subprocess
-          # 如果存在 build.py 或其他打包脚本直接调用
-          if os.path.exists("build.py"):
-              subprocess.run(["python3", "build.py", "--platform", "ios", "-o", "${{ github.workspace }}/final_output/nxnative-game-shell.ipa"])
-          else:
-              # 直接利用 xcodegen 生成 Xcode 工程并编译
-              subprocess.run(["xcodegen", "generate"])
-              subprocess.run(["xcodebuild", "-project", "smbw-mobile.xcodeproj", "-scheme", "smbw-mobile", "-sdk", "iphoneos", "-configuration", "Release", "CODE_SIGN_IDENTITY=", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGN_ENTITLEMENTS=", "CODE_SIGNING_ALLOWED=NO"])
-          ' || true
+          # 自动寻找 scripts 目录下的构建脚本或 python 文件
+          BUILD_SCRIPT=$(find scripts -maxdepth 2 -name "*.py" -o -name "*.sh" | head -n 1)
+          echo "找到构建脚本: $BUILD_SCRIPT"
+          
+          if [ -n "$BUILD_SCRIPT" ]; then
+            python3 "$BUILD_SCRIPT" . -k ~/.switch/prod.keys -o "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" || \
+            python3 "$BUILD_SCRIPT" || true
+          fi
 
-          # 如果上面没生成，直接通过 python 脚本兜底打包一个规范的 IPA
+          # 兜底：若未生成，尝试直接用 xcodegen 编译
+          if [ ! -f "${{ github.workspace }}/final_output/nxnative-game-shell.ipa" ]; then
+            xcodegen generate || true
+            xcodebuild -project smbw-mobile.xcodeproj -scheme smbw-mobile -sdk iphoneos -configuration Release CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED=NO || true
+          fi
+
           mkdir -p "${{ github.workspace }}/final_output"
           APP_DIR=$(find . -type d -name "*.app" | head -n 1)
           if [ -n "$APP_DIR" ]; then
