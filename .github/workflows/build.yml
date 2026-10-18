@@ -1,0 +1,77 @@
+﻿name: Build nxnative IPA
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release Tag'
+        required: true
+        default: 'v1.0'
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: 1. 清理磁盘并安装依赖
+        run: |
+          sudo rm -rf /Applications/Xcode_15*.app || true
+          sudo rm -rf /Library/Developer/CoreSimulator || true
+          brew install cmake ninja python3 p7zip llvm || true
+      - name: 2. 拉取源码
+        run: |
+          git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
+      - name: 3. 还原密钥
+        env:
+          KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
+        run: |
+          mkdir -p ~/.switch
+          if [ -n "$KEYS_B64" ]; then
+            echo "$KEYS_B64" | base64 --decode > ~/.switch/prod.keys
+            cp ~/.switch/prod.keys nxnative/prod.keys
+          fi
+      - name: 4. 下载游戏执行包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          mkdir -p raw_dl input_files/exefs input_files/romfs
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir raw_dl
+          cd raw_dl
+          for f in *.zip; do unzip -q -o "$f" -d ../input_files/; done
+          cd ..
+          if [ -f "input_files/prod.keys" ]; then
+            mkdir -p ~/.switch
+            cp input_files/prod.keys ~/.switch/prod.keys
+            cp input_files/prod.keys nxnative/prod.keys
+          fi
+          if [ -d "input_files/exefs/exefs" ]; then
+            mv input_files/exefs/exefs/* input_files/exefs/
+          fi
+      - name: 5. 编译 IPA 并注入 iPhone 13 内存突破权限
+        run: |
+          cd nxnative
+          chmod +x *.sh scripts/*.sh 2>/dev/null || true
+          if [ -f "build_ipa.sh" ]; then
+            ./build_ipa.sh ../input_files ~/.switch/prod.keys
+          else
+            python3 build.py --nsp-dir ../input_files --keys ~/.switch/prod.keys --platform ios
+          fi
+          APP_DIR=$(find . -type d -name "*.app" | head -n 1)
+          if [ -n "$APP_DIR" ]; then
+            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.increased-memory-limit bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.developer.kernel.extended-virtual-addressing bool true" "$APP_DIR/Info.plist" 2>/dev/null || true
+            rm -rf "$APP_DIR/romfs"/* 2>/dev/null || true
+            mkdir -p Payload
+            cp -r "$APP_DIR" Payload/
+            zip -r9 "${{ github.workspace }}/nxnative-game-shell.ipa" Payload
+          fi
+      - name: 6. 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxnative-output-ipa
+          path: |
+            nxnative-game-shell.ipa
+            nxnative/**/*.ipa
+            nxnative/build/*.ipa
+            *.ipa
+          if-no-files-found: error
+          retention-days: 3
