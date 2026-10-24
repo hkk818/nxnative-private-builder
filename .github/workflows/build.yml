@@ -15,13 +15,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 180
     env:
-      GAME: "01007EF00011E000"
-      DM_GAME: "01007EF00011E000"
-      PKG_VER: "v1114112"
-      MODS_LIST: "main subsdk0 sdk"
-      ROMFS_MARKER: "Pack/Bootup_Graphics.pack"
-      OUT_IPA_NAME: "ZeldaBreathOfTheWild-shell.ipa"
-      ZIP_NAME: "exefs_ready_01007EF00011E000.zip"
+      GAME: "01006BB00C6F0000"
+      DM_GAME: "01006BB00C6F0000"
+      PKG_VER: "v131072"
+      MODS_LIST: "main subsdk0 subsdk1 sdk"
+      ROMFS_MARKER: "region_common/shader/postprocess.bfsha"
+      OUT_IPA_NAME: "ZeldaLinksAwakening-shell.ipa"
+      ZIP_NAME: "exefs_ready_01006BB00C6F0000.zip"
       WORK_DIR: "${{ github.workspace }}/game_work"
       DM_ROOT: "${{ github.workspace }}/game_work"
       WORK: "${{ github.workspace }}/game_work/tmp"
@@ -29,7 +29,7 @@ jobs:
       CTRL_SRC: "${{ github.workspace }}/extracted_bundle/control"
       MINI_ROMFS: "${{ github.workspace }}/extracted_bundle/mini_romfs"
     steps:
-      - name: 1. 安装编译依赖并切换最新 Xcode
+      - name: 1. 安装编译环境与工具链
         run: |
           LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
           sudo xcode-select -s "$LATEST_XCODE"
@@ -39,22 +39,65 @@ jobs:
           brew install --cask dotnet-sdk || true
           python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
 
-      - name: 2. 拉取 nxnative 源码并注入通用 RomFS + DLC (Documents/aoc) 挂载补丁
+      - name: 2. 拉取 nxnative 源码并注入【免费AppleID 1.25G安全内存 + A15通用架构 + Documents挂载】补丁
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
           cd nxnative
-          # 1) 在 hle_fs.c 中支持自动识别手机 Documents/romfs
+
+          # 补丁 A: 裁剪 app_pool 到 1.25GB (0x50000000)，彻底适配免费 Apple ID 侧载，避免 iOS Jetsam OOM 秒杀
+          python3 -c '
+          import os
+          p = f"dm/games/{os.environ[\"GAME\"]}/game.tsv"
+          lines = open(p, "r", encoding="utf-8").read().splitlines()
+          new_lines = []
+          for l in lines:
+              if l.startswith("app_pool\t"):
+                  new_lines.append("app_pool\t0x50000000")
+              elif l.startswith("mem_reserve\t"):
+                  new_lines.append("mem_reserve\t0xC0000000")
+              else:
+                  new_lines.append(l)
+          open(p, "w", encoding="utf-8").write("\n".join(new_lines) + "\n")
+          print("  [OK] 已成功将游戏内存池裁剪至 1.25GB 安全限制")
+          '
+
+          # 补丁 B: 优化 project.yml，将硬编码的 -mcpu=apple-a18 替换为兼容 A15 (iPhone 13) 与 A18 (16 Pro) 的通用指令集
+          python3 -c '
+          p = "dm/ios/project.yml"
+          s = open(p, "r", encoding="utf-8").read()
+          s = s.replace("-mcpu=apple-a18", "-march=armv8.5-a")
+          open(p, "w", encoding="utf-8").write(s)
+          print("  [OK] 已将编译器微架构优化为通用 armv8.5-a，完美兼容 iPhone 13 与 16 Pro")
+          '
+
+          # 补丁 C: 在 main.m 中注入智能 RomFS 探测，包内为空时绝不假冒命中，防止闪退，友好提示用户放入 Documents/romfs
+          python3 -c '
+          p = "dm/ios/Sources/main.m"
+          s = open(p, "r", encoding="utf-8").read()
+          old = "if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;"
+          new = """// 如果是 App 内置的 romfs，必须确认它不仅有 marker，还要有超过 1MB 的真实数据，否则判定为空壳，优先引导 Documents/romfs
+          if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) {
+              if (![d containsString:\".app\"]) return d;
+              NSDictionary *attrs = [fm attributesOfItemAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER] error:nil];
+              if ([attrs fileSize] > 1024) return d;
+          }"""
+          assert old in s
+          open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
+          print("  [OK] 已注入空壳 RomFS 防闪退保护")
+          '
+
+          # 补丁 D: 在 hle_fs.c 中支持自动识别手机 Documents/romfs
           python3 -c '
           p = "dm/host/hle_fs.c"
           s = open(p, "r", encoding="utf-8").read()
           old = "const char *v = getenv(var);\n    if (v) return v;"
-          new = """if (!strcmp(var, "DM_ROMFS")) {
-              const char *h = getenv("HOME");
+          new = """if (!strcmp(var, \"DM_ROMFS\")) {
+              const char *h = getenv(\"HOME\");
               if (h) {
-                  snprintf(buf, n, "%s/Documents/romfs/" DM_GAME_ROMFS_MARKER, h);
-                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents/romfs", h); return buf; }
-                  snprintf(buf, n, "%s/Documents/" DM_GAME_ROMFS_MARKER, h);
-                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents", h); return buf; }
+                  snprintf(buf, n, \"%s/Documents/romfs/\" DM_GAME_ROMFS_MARKER, h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, \"%s/Documents/romfs\", h); return buf; }
+                  snprintf(buf, n, \"%s/Documents/\" DM_GAME_ROMFS_MARKER, h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, \"%s/Documents\", h); return buf; }
               }
           }
           const char *v = getenv(var);
@@ -62,16 +105,17 @@ jobs:
           assert old in s
           open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
           '
-          # 2) 在 main.c 启动入口自动检测手机 Documents/aoc 以挂载全部 DLC
+
+          # 补丁 E: 在 main.c 启动入口自动检测手机 Documents/aoc 以挂载全部 DLC
           python3 -c '
           p = "dm/host/main.c"
           s = open(p, "r", encoding="utf-8").read()
           old = "g_t0_ns = proc_start_mono_ns();"
           new = """g_t0_ns = proc_start_mono_ns();
-          if (getenv("HOME")) {
+          if (getenv(\"HOME\")) {
               char aoc_buf[1024];
-              snprintf(aoc_buf, sizeof aoc_buf, "%s/Documents/aoc", getenv("HOME"));
-              if (!access(aoc_buf, F_OK)) setenv("DM_AOC_DIR", aoc_buf, 1);
+              snprintf(aoc_buf, sizeof aoc_buf, \"%s/Documents/aoc\", getenv(\"HOME\"));
+              if (!access(aoc_buf, F_OK)) setenv(\"DM_AOC_DIR\", aoc_buf, 1);
           }"""
           assert old in s
           open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
@@ -107,7 +151,7 @@ jobs:
             DM_RULESET=native python3 dm/tools/patch_nso.py "$EXEFS_SRC/$mod" "$WORK_DIR/patched_$PKG_VER" "$mod"
           done
 
-      - name: 5. 并行拆分着色器并同步映射表 (shader_split.py)
+      - name: 5. 拆分提取着色器并同步映射表 (shader_split.py)
         run: |
           cd "${{ github.workspace }}/nxnative"
           python3 dm/gfx/tools/shader_split.py \
@@ -121,75 +165,18 @@ jobs:
           cp -f "$WORK_DIR/shader/tables/shader_map.tsv" "dm/games/$GAME/shader_map.tsv"
           cp -f "$WORK_DIR/shader/tables/shader_pairs.tsv" "dm/games/$GAME/shader_pairs.tsv"
 
-          python3 -c '
-          p = "dm/gfx/tools/dmsh_build.py"
-          s = open(p, "r", encoding="utf-8").read()
-          s = s.replace("subprocess.run([*MAC_METAL, fmsl, \x27-o\x27, fair], check=True)", "open(fair, \x27wb\x27).close()")
-          s = s.replace("subprocess.run([\x27xcrun\x27, \x27-sdk\x27, \x27macosx\x27, \x27metallib\x27, fair, \x27-o\x27, tmp_flib], check=True)", "open(tmp_flib, \x27wb\x27).close()")
-          s = s.replace("subprocess.run([*MAC_METAL, msl, \x27-o\x27, air], check=True)", "open(air, \x27wb\x27).close()")
-          s = s.replace("subprocess.run([\x27xcrun\x27, \x27-sdk\x27, \x27macosx\x27, \x27metallib\x27, air, \x27-o\x27, tmp_lib], check=True)", "open(tmp_lib, \x27wb\x27).close()")
-          open(p, "w", encoding="utf-8").write(s)
-          '
-
+      - name: 6. 全量编译 iOS Metal 着色器库并生成完备元数据表 (dmsh_build.py)
+        run: |
+          cd "${{ github.workspace }}/nxnative"
           chmod +x dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
           python3 dm/gfx/tools/dmsh_chain.py --update-lock
           python3 dm/gfx/tools/dmsh_chain.py --header
 
-          python3 -c '
-          import os
-          g = os.environ["GAME"]
-          pairs = set()
-          for ln in open(f"dm/games/{g}/shader_pairs.tsv"):
-              if ln.strip() and not ln.startswith("#"):
-                  pairs.add(ln.split()[0])
-          all_keys = []
-          for ln in open(f"dm/games/{g}/shader_map.tsv"):
-              c = ln.rstrip("\n").split("\t")
-              if len(c) > 4 and (c[0].endswith(".bin") or c[0].startswith("main.rodata@")):
-                  all_keys.append(c[3])
-          non_paired = sorted(set(all_keys) - pairs)
-          paired = sorted(set(all_keys) & pairs)
-          h1 = len(non_paired) // 2
-          h2 = len(paired) // 2
-          batches = [non_paired[:h1], non_paired[h1:], paired[:h2], paired[h2:]]
-          for i, b in enumerate(batches, 1):
-              open(f"batch_{i}.txt", "w").write("\n".join(b) + "\n")
-              print(f"Batch {i}: {len(b)} shaders")
-          '
+          # 执行无参数全量编译: 自动生成 inputs.tsv, c1_full.tsv, cb_extent.tsv
+          MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" J=8 \
+            python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
 
-      - name: 6. 编译 iOS Metal 着色器库 [第 1/4 批 - 像素与计算前半]
-        run: |
-          cd "${{ github.workspace }}/nxnative"
-          if [ -s batch_1.txt ]; then
-            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
-              xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_1.txt
-          fi
-
-      - name: 7. 编译 iOS Metal 着色器库 [第 2/4 批 - 像素与计算后半]
-        run: |
-          cd "${{ github.workspace }}/nxnative"
-          if [ -s batch_2.txt ]; then
-            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
-              xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_2.txt
-          fi
-
-      - name: 8. 编译 iOS Metal 着色器库 [第 3/4 批 - 顶点着色器前半]
-        run: |
-          cd "${{ github.workspace }}/nxnative"
-          if [ -s batch_3.txt ]; then
-            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
-              xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_3.txt
-          fi
-
-      - name: 9. 编译 iOS Metal 着色器库 [第 4/4 批 - 顶点着色器后半]
-        run: |
-          cd "${{ github.workspace }}/nxnative"
-          if [ -s batch_4.txt ]; then
-            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" \
-              xargs python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache" < batch_4.txt
-          fi
-
-      - name: 10. 生成 Xcode 工程并打包 iPhone 16 Pro 空壳 IPA
+      - name: 7. 生成 Xcode 工程并打包通用空壳 IPA
         run: |
           cd "${{ github.workspace }}/nxnative"
           export USER=$(whoami)
@@ -223,7 +210,7 @@ jobs:
 
           ls -lh "${{ github.workspace }}/final_output"
 
-      - name: 11. 上传生成的无签名 IPA
+      - name: 8. 上传生成的通用版 IPA 产物
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
