@@ -5,10 +5,10 @@ on:
       release_tag:
         description: 'Release Tag'
         required: true
-        default: 'v1.0'
+        default: 'v1.1'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-ipa:
@@ -39,27 +39,28 @@ jobs:
           brew install --cask dotnet-sdk || true
           python3 -m pip install --break-system-packages lz4 capstone fonttools || python3 -m pip install lz4 capstone fonttools
 
-      - name: 2. 拉取 nxnative 源码并注入【免费AppleID 1.25G安全内存 + A15通用架构 + Documents挂载】补丁
+      - name: 2. 拉取 nxnative 源码并注入【分配器TLS防崩 + A15通用架构 + Documents挂载】补丁
         run: |
           git clone --depth 1 https://github.com/seedds/nxnative.git nxnative
           cd nxnative
 
-          # 补丁 A: 裁剪 app_pool 到 1.25GB (0x50000000)，彻底适配免费 Apple ID 侧载，避免 iOS Jetsam OOM 秒杀
+          # 补丁 A: 注入 Nintendo SDK 8.2.0 分配器初始化防崩补丁 (织梦岛 sdk build ID: 3ae34e689d7a35f13cbf42bfd672af8b)
+          # 解决真机进入 nnMain 时 StandardAllocator 触发的 AllocateTlsSlot 断言崩溃
           python3 -c '
-          import os
-          g = os.environ["GAME"]
-          p = "dm/games/" + g + "/game.tsv"
-          lines = open(p, "r", encoding="utf-8").read().splitlines()
-          new_lines = []
-          for l in lines:
-              if l.startswith("app_pool\t"):
-                  new_lines.append("app_pool\t0x50000000")
-              elif l.startswith("mem_reserve\t"):
-                  new_lines.append("mem_reserve\t0xC0000000")
-              else:
-                  new_lines.append(l)
-          open(p, "w", encoding="utf-8").write("\n".join(new_lines) + "\n")
-          print("  [OK] 内存池已裁剪至 1.25GB 安全限制")
+          p = "dm/tools/sdk_patches.py"
+          s = open(p, "r", encoding="utf-8").read()
+          cut = """  # The Legend of Zelda: Link'\''s Awakening 1.1.0 sdk: StandardAllocator::Initialize skips thread-cache TLS allocation
+  "3ae34e689d7a35f13cbf42bfd672af8b": [
+    (0x2e7664, "f4000036", "07000014", "StandardAllocator::Initialize: tbz w20, #0, #0x2e7680 -> b #0x2e7680 (skip TLS slot alloc)"),
+    (0x2e767c, "a0020035", "1f2003d5", "StandardAllocator::Initialize: cbnz w0, #0x2e76d0 -> nop (ignore TLS result)"),
+  ],
+"""
+          idx = s.find("CUTS = {")
+          assert idx != -1
+          idx = s.find("\n", idx) + 1
+          s = s[:idx] + cut + s[idx:]
+          open(p, "w", encoding="utf-8").write(s)
+          print("  [OK] sdk StandardAllocator TLS 防崩补丁注入成功")
           '
 
           # 补丁 B: 优化 project.yml，将硬编码的 -mcpu=apple-a18 替换为兼容 A15 (iPhone 13) 与 A18 (16 Pro) 的通用指令集
@@ -131,39 +132,77 @@ jobs:
                           out.write(z.read(info.filename))
           '
 
-      - name: 4. 静态重写 NSO 模块 (patch_nso.py)
+      - name: 4. 静态重写 NSO 模块 (patch_nso.py，注入防崩 CUT)
         run: |
           cd "${{ github.workspace }}/nxnative"
           for mod in $MODS_LIST; do
             DM_RULESET=native python3 dm/tools/patch_nso.py "$EXEFS_SRC/$mod" "$WORK_DIR/patched_$PKG_VER" "$mod"
           done
 
-      - name: 5. 拆分提取着色器并同步映射表 (shader_split.py)
+      - name: 5. 着色器缓存恢复与准备 (秒级复用上轮 25,000+ 着色器)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd "${{ github.workspace }}/nxnative"
-          python3 dm/gfx/tools/shader_split.py \
-            "$MINI_ROMFS" \
-            "$EXEFS_SRC/main" \
-            "$WORK_DIR/shader/pkg" \
-            "$WORK_DIR/shader/tables/shader_map.tsv" \
-            "$WORK_DIR/shader/tables/shader_facts.tsv" \
-            "$WORK_DIR/shader/tables/shader_pairs.tsv"
+          NEED_FULL_BUILD=1
+          mkdir -p prev_art
+          if gh run download 40052586298 -n nxnative-output-ipa --dir prev_art 2>/dev/null; then
+            echo "==> 成功下载上轮构建产物，正在提取全量 Metal 着色器库与映射表..."
+            python3 -c '
+            import zipfile, os
+            ipa_path = os.path.join("prev_art", "ZeldaLinksAwakening-shell.ipa")
+            work = os.environ["WORK_DIR"]
+            game = os.environ["GAME"]
+            with zipfile.ZipFile(ipa_path, "r") as z:
+                for info in z.infolist():
+                    name = info.filename
+                    if "Payload/DmIOS.app/msl/" in name:
+                        rel = name.split("Payload/DmIOS.app/msl/")[1]
+                        if rel:
+                            target = os.path.join(work, "shader", "ios", rel)
+                            os.makedirs(os.path.dirname(target), exist_ok=True)
+                            with open(target, "wb") as f: f.write(z.read(name))
+                    elif name == "Payload/DmIOS.app/dm/c1_full.tsv":
+                        target = os.path.join("dm/games", game, "c1_full.tsv")
+                        with open(target, "wb") as f: f.write(z.read(name))
+                    elif name == "Payload/DmIOS.app/dm/cb_extent.tsv":
+                        target = os.path.join("dm/games", game, "cb_extent.tsv")
+                        with open(target, "wb") as f: f.write(z.read(name))
+                    elif name == "Payload/DmIOS.app/dm/pso_manifest.tsv":
+                        target = os.path.join("dm/games", game, "pso_manifest.tsv")
+                        with open(target, "wb") as f: f.write(z.read(name))
+                    elif name == "Payload/DmIOS.app/dm/shader_map.tsv":
+                        target = os.path.join("dm/games", game, "shader_map.tsv")
+                        with open(target, "wb") as f: f.write(z.read(name))
+            print("  [OK] 25,000+ 个已编译 Metal 着色器库与映射表已全部秒级解压恢复！")
+            '
+            if [ -f "dm/games/$GAME/c1_full.tsv" ] && [ -d "$WORK_DIR/shader/ios" ]; then
+              NEED_FULL_BUILD=0
+            fi
+          fi
 
-          cp -f "$WORK_DIR/shader/tables/shader_map.tsv" "dm/games/$GAME/shader_map.tsv"
-          cp -f "$WORK_DIR/shader/tables/shader_pairs.tsv" "dm/games/$GAME/shader_pairs.tsv"
+          if [ "$NEED_FULL_BUILD" -eq 1 ]; then
+            echo "==> 未命中缓存，开始全量编译着色器..."
+            python3 dm/gfx/tools/shader_split.py \
+              "$MINI_ROMFS" \
+              "$EXEFS_SRC/main" \
+              "$WORK_DIR/shader/pkg" \
+              "$WORK_DIR/shader/tables/shader_map.tsv" \
+              "$WORK_DIR/shader/tables/shader_facts.tsv" \
+              "$WORK_DIR/shader/tables/shader_pairs.tsv"
 
-      - name: 6. 全量编译 iOS Metal 着色器库并生成完备元数据表 (dmsh_build.py)
-        run: |
-          cd "${{ github.workspace }}/nxnative"
-          chmod +x dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
-          python3 dm/gfx/tools/dmsh_chain.py --update-lock
-          python3 dm/gfx/tools/dmsh_chain.py --header
+            cp -f "$WORK_DIR/shader/tables/shader_map.tsv" "dm/games/$GAME/shader_map.tsv"
+            cp -f "$WORK_DIR/shader/tables/shader_pairs.tsv" "dm/games/$GAME/shader_pairs.tsv"
 
-          # 执行无参数全量编译: 自动生成 inputs.tsv, c1_full.tsv, cb_extent.tsv
-          MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" J=8 \
-            python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
+            chmod +x dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
+            python3 dm/gfx/tools/dmsh_chain.py --update-lock
+            python3 dm/gfx/tools/dmsh_chain.py --header
 
-      - name: 7. 生成 Xcode 工程并打包通用空壳 IPA
+            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" J=8 \
+              python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
+          fi
+
+      - name: 6. 生成 Xcode 工程并打包通用空壳 IPA
         run: |
           cd "${{ github.workspace }}/nxnative"
           export USER=$(whoami)
@@ -197,10 +236,10 @@ jobs:
 
           ls -lh "${{ github.workspace }}/final_output"
 
-      - name: 8. 上传生成的通用版 IPA 产物
+      - name: 7. 上传生成的通用版修复 IPA 产物
         uses: actions/upload-artifact@v4
         with:
           name: nxnative-output-ipa
           path: ${{ github.workspace }}/final_output/*.ipa
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
