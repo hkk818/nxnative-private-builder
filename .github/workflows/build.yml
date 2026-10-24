@@ -166,6 +166,15 @@ jobs:
             '
             if [ -f "dm/games/$GAME/c1_full.tsv" ] && [ -d "$WORK_DIR/shader/ios" ]; then
               NEED_FULL_BUILD=0
+              DMSH_VER=$(ls -d "$WORK_DIR/shader/ios"/b-* 2>/dev/null | head -n 1 | sed 's/.*b-//')
+              if [ -n "$DMSH_VER" ]; then
+                echo "==> DMSH_CHAIN: $DMSH_VER"
+                printf '// Generated DMSH_CHAIN\n#define DMSH_CHAIN "%%s"\n' "$DMSH_VER" > dm/gfx/nvn/dmsh_chain.h
+                IN=$(DM_GAME="$GAME" python3 dm/gfx/tools/dmsh_chain.py --inputs 2>/dev/null || echo "")
+                if [ -n "$IN" ]; then
+                  printf "game\t%%s\ninputs\t%%s\n" "$GAME" "$IN" > "$WORK_DIR/shader/ios/b-$DMSH_VER/inputs.tsv"
+                fi
+              fi
             fi
           fi
 
