@@ -166,15 +166,25 @@ jobs:
             '
             if [ -f "dm/games/$GAME/c1_full.tsv" ] && [ -d "$WORK_DIR/shader/ios" ]; then
               NEED_FULL_BUILD=0
-              DMSH_VER=$(ls -d "$WORK_DIR/shader/ios"/b-* 2>/dev/null | head -n 1 | sed 's/.*b-//')
-              if [ -n "$DMSH_VER" ]; then
-                echo "==> DMSH_CHAIN: $DMSH_VER"
-                printf '// Generated DMSH_CHAIN\n#define DMSH_CHAIN "%%s"\n' "$DMSH_VER" > dm/gfx/nvn/dmsh_chain.h
-                IN=$(DM_GAME="$GAME" python3 dm/gfx/tools/dmsh_chain.py --inputs 2>/dev/null || echo "")
-                if [ -n "$IN" ]; then
-                  printf "game\t%%s\ninputs\t%%s\n" "$GAME" "$IN" > "$WORK_DIR/shader/ios/b-$DMSH_VER/inputs.tsv"
-                fi
-              fi
+              python3 -c '
+              import os, glob, subprocess
+              work = os.environ["WORK_DIR"]
+              game = os.environ["GAME"]
+              dirs = glob.glob(os.path.join(work, "shader", "ios", "b-*"))
+              if dirs:
+                  ver = os.path.basename(dirs[0]).replace("b-", "")
+                  print(f"==> DMSH_CHAIN version: {ver}")
+                  with open("dm/gfx/nvn/dmsh_chain.h", "w", encoding="utf-8") as f:
+                      f.write(f"#define DMSH_CHAIN \"{ver}\"\n")
+                  cmd = ["python3", "dm/gfx/tools/dmsh_chain.py", "--inputs"]
+                  res = subprocess.run(cmd, env=dict(os.environ, DM_GAME=game), capture_output=True, text=True)
+                  in_hash = res.stdout.strip()
+                  tsv_path = os.path.join(dirs[0], "inputs.tsv")
+                  if in_hash:
+                      with open(tsv_path, "w", encoding="utf-8") as f:
+                          f.write(f"game\t{game}\ninputs\t{in_hash}\n")
+                      print(f"  [OK] inputs.tsv stamped with {in_hash}")
+              '
             fi
           fi
 
