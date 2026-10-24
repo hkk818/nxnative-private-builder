@@ -146,7 +146,7 @@ jobs:
                     name = info.filename
                     if "Payload/DmIOS.app/msl/" in name:
                         rel = name.split("Payload/DmIOS.app/msl/")[1]
-                        if rel:
+                        if rel and not name.endswith("/"):
                             target = os.path.join(work, "shader", "ios", rel)
                             os.makedirs(os.path.dirname(target), exist_ok=True)
                             with open(target, "wb") as f: f.write(z.read(name))
