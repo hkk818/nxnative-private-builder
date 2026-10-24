@@ -1,4 +1,4 @@
-name: Build nxnative IPA
+﻿name: Build nxnative IPA
 on:
   workflow_dispatch:
     inputs:
@@ -47,7 +47,8 @@ jobs:
           # 补丁 A: 裁剪 app_pool 到 1.25GB (0x50000000)，彻底适配免费 Apple ID 侧载，避免 iOS Jetsam OOM 秒杀
           python3 -c '
           import os
-          p = f"dm/games/{os.environ[\"GAME\"]}/game.tsv"
+          g = os.environ["GAME"]
+          p = "dm/games/" + g + "/game.tsv"
           lines = open(p, "r", encoding="utf-8").read().splitlines()
           new_lines = []
           for l in lines:
@@ -58,7 +59,7 @@ jobs:
               else:
                   new_lines.append(l)
           open(p, "w", encoding="utf-8").write("\n".join(new_lines) + "\n")
-          print("  [OK] 已成功将游戏内存池裁剪至 1.25GB 安全限制")
+          print("  [OK] 内存池已裁剪至 1.25GB 安全限制")
           '
 
           # 补丁 B: 优化 project.yml，将硬编码的 -mcpu=apple-a18 替换为兼容 A15 (iPhone 13) 与 A18 (16 Pro) 的通用指令集
@@ -67,58 +68,44 @@ jobs:
           s = open(p, "r", encoding="utf-8").read()
           s = s.replace("-mcpu=apple-a18", "-march=armv8.5-a")
           open(p, "w", encoding="utf-8").write(s)
-          print("  [OK] 已将编译器微架构优化为通用 armv8.5-a，完美兼容 iPhone 13 与 16 Pro")
+          print("  [OK] 指令集架构已优化为通用 armv8.5-a，完美兼容 iPhone 13 与 16 Pro")
           '
 
-          # 补丁 C: 在 main.m 中注入智能 RomFS 探测，包内为空时绝不假冒命中，防止闪退，友好提示用户放入 Documents/romfs
-          python3 -c '
-          p = "dm/ios/Sources/main.m"
-          s = open(p, "r", encoding="utf-8").read()
-          old = "if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;"
-          new = """// 如果是 App 内置的 romfs，必须确认它不仅有 marker，还要有超过 1MB 的真实数据，否则判定为空壳，优先引导 Documents/romfs
-          if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) {
-              if (![d containsString:\".app\"]) return d;
-              NSDictionary *attrs = [fm attributesOfItemAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER] error:nil];
-              if ([attrs fileSize] > 1024) return d;
-          }"""
-          assert old in s
-          open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
-          print("  [OK] 已注入空壳 RomFS 防闪退保护")
-          '
-
-          # 补丁 D: 在 hle_fs.c 中支持自动识别手机 Documents/romfs
+          # 补丁 C: 在 hle_fs.c 中支持自动识别手机 Documents/romfs
           python3 -c '
           p = "dm/host/hle_fs.c"
           s = open(p, "r", encoding="utf-8").read()
           old = "const char *v = getenv(var);\n    if (v) return v;"
-          new = """if (!strcmp(var, \"DM_ROMFS\")) {
-              const char *h = getenv(\"HOME\");
+          new = """if (!strcmp(var, "DM_ROMFS")) {
+              const char *h = getenv("HOME");
               if (h) {
-                  snprintf(buf, n, \"%s/Documents/romfs/\" DM_GAME_ROMFS_MARKER, h);
-                  if (!access(buf, F_OK)) { snprintf(buf, n, \"%s/Documents/romfs\", h); return buf; }
-                  snprintf(buf, n, \"%s/Documents/\" DM_GAME_ROMFS_MARKER, h);
-                  if (!access(buf, F_OK)) { snprintf(buf, n, \"%s/Documents\", h); return buf; }
+                  snprintf(buf, n, "%s/Documents/romfs/" DM_GAME_ROMFS_MARKER, h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents/romfs", h); return buf; }
+                  snprintf(buf, n, "%s/Documents/" DM_GAME_ROMFS_MARKER, h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents", h); return buf; }
               }
           }
           const char *v = getenv(var);
           if (v) return v;"""
           assert old in s
           open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
+          print("  [OK] Documents/romfs 挂载支持已就绪")
           '
 
-          # 补丁 E: 在 main.c 启动入口自动检测手机 Documents/aoc 以挂载全部 DLC
+          # 补丁 D: 在 main.c 启动入口自动检测手机 Documents/aoc 以挂载全部 DLC
           python3 -c '
           p = "dm/host/main.c"
           s = open(p, "r", encoding="utf-8").read()
           old = "g_t0_ns = proc_start_mono_ns();"
           new = """g_t0_ns = proc_start_mono_ns();
-          if (getenv(\"HOME\")) {
+          if (getenv("HOME")) {
               char aoc_buf[1024];
-              snprintf(aoc_buf, sizeof aoc_buf, \"%s/Documents/aoc\", getenv(\"HOME\"));
-              if (!access(aoc_buf, F_OK)) setenv(\"DM_AOC_DIR\", aoc_buf, 1);
+              snprintf(aoc_buf, sizeof aoc_buf, "%s/Documents/aoc", getenv("HOME"));
+              if (!access(aoc_buf, F_OK)) setenv("DM_AOC_DIR", aoc_buf, 1);
           }"""
           assert old in s
           open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
+          print("  [OK] Documents/aoc DLC 挂载支持已就绪")
           '
 
       - name: 3. 下载并解压精简构建包
