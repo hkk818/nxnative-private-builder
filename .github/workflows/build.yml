@@ -1,4 +1,4 @@
-name: Build nxnative IPA
+﻿name: Build nxnative IPA
 on:
   workflow_dispatch:
     inputs:
@@ -49,12 +49,9 @@ jobs:
           python3 -c '
           p = "dm/tools/sdk_patches.py"
           s = open(p, "r", encoding="utf-8").read()
-          cut = """  # The Legend of Zelda: Link'\''s Awakening 1.1.0 sdk: StandardAllocator::Initialize skips thread-cache TLS allocation
-  "3ae34e689d7a35f13cbf42bfd672af8b": [
-    (0x2e7664, "f4000036", "07000014", "StandardAllocator::Initialize: tbz w20, #0, #0x2e7680 -> b #0x2e7680 (skip TLS slot alloc)"),
-    (0x2e767c, "a0020035", "1f2003d5", "StandardAllocator::Initialize: cbnz w0, #0x2e76d0 -> nop (ignore TLS result)"),
-  ],
-"""
+          c1 = (0x2e7664, 'f4000036', '07000014', 'skip TLS slot alloc')
+          c2 = (0x2e767c, 'a0020035', '1f2003d5', 'ignore TLS result')
+          cut = '  "3ae34e689d7a35f13cbf42bfd672af8b": [' + repr(c1) + ', ' + repr(c2) + '],\n'
           idx = s.find("CUTS = {")
           assert idx != -1
           idx = s.find("\n", idx) + 1
