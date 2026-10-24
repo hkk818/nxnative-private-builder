@@ -46,19 +46,7 @@ jobs:
 
           # 补丁 A: 注入 Nintendo SDK 8.2.0 分配器初始化防崩补丁 (织梦岛 sdk build ID: 3ae34e689d7a35f13cbf42bfd672af8b)
           # 解决真机进入 nnMain 时 StandardAllocator 触发的 AllocateTlsSlot 断言崩溃
-          python3 -c '
-          p = "dm/tools/sdk_patches.py"
-          s = open(p, "r", encoding="utf-8").read()
-          c1 = (0x2e7664, 'f4000036', '07000014', 'skip TLS slot alloc')
-          c2 = (0x2e767c, 'a0020035', '1f2003d5', 'ignore TLS result')
-          cut = '  "3ae34e689d7a35f13cbf42bfd672af8b": [' + repr(c1) + ', ' + repr(c2) + '],\n'
-          idx = s.find("CUTS = {")
-          assert idx != -1
-          idx = s.find("\n", idx) + 1
-          s = s[:idx] + cut + s[idx:]
-          open(p, "w", encoding="utf-8").write(s)
-          print("  [OK] sdk StandardAllocator TLS 防崩补丁注入成功")
-          '
+          python3 -c "import base64; exec(base64.b64decode('cCA9ICdkbS90b29scy9zZGtfcGF0Y2hlcy5weScKcyA9IG9wZW4ocCwgJ3InLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKZW50cnkgPSAiIiIgICMgVGhlIExlZ2VuZCBvZiBaZWxkYTogTGluayBBd2FrZW5pbmcgMS4xLjAgc2RrIHBhdGNoCiAgIjNhZTM0ZTY4OWQ3YTM1ZjEzY2JmNDJiZmQ2NzJhZjhiIjogWwogICAgKDB4MmU3NjY0LCAiZjQwMDAwMzYiLCAiMDcwMDAwMTQiLCAic2tpcCBUTFMgc2xvdCBhbGxvYyIpLAogICAgKDB4MmU3NjdjLCAiYTAwMjAwMzUiLCAiMWYyMDAzZDUiLCAiaWdub3JlIFRMUyByZXN1bHQiKSwKICBdLAoiIiIKaWR4ID0gcy5maW5kKCdDVVRTID0geycpCmFzc2VydCBpZHggIT0gLTEKaWR4ID0gcy5maW5kKCdcbicsIGlkeCkgKyAxCnMgPSBzWzppZHhdICsgZW50cnkgKyBzW2lkeDpdCm9wZW4ocCwgJ3cnLCBlbmNvZGluZz0ndXRmLTgnKS53cml0ZShzKQpwcmludCgnICBbT0tdIHNkayBTdGFuZGFyZEFsbG9jYXRvciBUTFMg6Ziy5bSp6KGl5LiB5rOo5YWl5oiQ5YqfJyk=').decode('utf-8'))"
 
           # 补丁 B: 优化 project.yml，将硬编码的 -mcpu=apple-a18 替换为兼容 A15 (iPhone 13) 与 A18 (16 Pro) 的通用指令集
           python3 -c '
