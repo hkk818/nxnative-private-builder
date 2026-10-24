@@ -46,7 +46,7 @@ jobs:
 
           #   A:   Nintendo SDK 8.2.0   (  sdk build ID: 3ae34e689d7a35f13cbf42bfd672af8b)
           #   nnMain   StandardAllocator   AllocateTlsSlot  
-          python3 -c "import base64; exec(base64.b64decode('cCA9ICdkbS90b29scy9zZGtfcGF0Y2hlcy5weScKcyA9IG9wZW4ocCwgJ3InLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKZW50cnkgPSAiIiIgICMgVGhlIExlZ2VuZCBvZiBaZWxkYTogTGluayBBd2FrZW5pbmcgMS4xLjAgc2RrIHBhdGNoCiAgIjNhZTM0ZTY4OWQ3YTM1ZjEzY2JmNDJiZmQ2NzJhZjhiIjogWwogICAgKDB4MmU3NjY0LCAiZjQwMDAwMzYiLCAiMDcwMDAwMTQiLCAic2tpcCBUTFMgc2xvdCBhbGxvYyIpLAogICAgKDB4MmU3NjdjLCAiYTAwMjAwMzUiLCAiMWYyMDAzZDUiLCAiaWdub3JlIFRMUyByZXN1bHQiKSwKICBdLAoiIiIKaWR4ID0gcy5maW5kKCdDVVRTID0geycpCmFzc2VydCBpZHggIT0gLTEKaWR4ID0gcy5maW5kKCdcbicsIGlkeCkgKyAxCnMgPSBzWzppZHhdICsgZW50cnkgKyBzW2lkeDpdCm9wZW4ocCwgJ3cnLCBlbmNvZGluZz0ndXRmLTgnKS53cml0ZShzKQpwcmludCgnICBbT0tdIHNkayBTdGFuZGFyZEFsbG9jYXRvciBUTFMg6Ziy5bSp6KGl5LiB5rOo5YWl5oiQ5YqfJyk=').decode('utf-8'))"
+          python3 -c "import base64; exec(base64.b64decode('cCA9ICdkbS90b29scy9zZGtfcGF0Y2hlcy5weScKcyA9IG9wZW4ocCwgJ3InLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKZW50cnkgPSAiIiIgICMgVGhlIExlZ2VuZCBvZiBaZWxkYTogTGluaydzIEF3YWtlbmluZyAxLjEuMCBzZGsgcGF0Y2gKICAiM2FlMzRlNjg5ZDdhMzVmMTNjYmY0MmJmZDY3MmFmOGIiOiBbCiAgICAoMHgyZTc2NjAsICI2ODA2MDAzOSIsICI3ZjA2MDAzOSIsICJkaXNhYmxlIHRocmVhZCBjYWNoZSIpLAogICAgKDB4MmU3NjY0LCAiZjQwMDAwMzYiLCAiMDcwMDAwMTQiLCAic2tpcCBUTFMgc2xvdCBhbGxvYyIpLAogICAgKDB4MmU3NjdjLCAiYTAwMjAwMzUiLCAiMWYyMDAzZDUiLCAiaWdub3JlIFRMUyByZXN1bHQiKSwKICAgICgweDJlNzc4NCwgIjY4MDUwMDM0IiwgIjJiMDAwMDE0IiwgImRpcmVjdCBDZW50cmFsSGVhcDo6QWxsb2MiKSwKICAgICgweDJlNzg4YywgIjg4MDEwMDM0IiwgIjBjMDAwMDE0IiwgImRpcmVjdCBDZW50cmFsSGVhcDo6RnJlZSIpLAogICAgKDB4MmU3OTBjLCAiNDgwNjAwMzQiLCAiMzIwMDAwMTQiLCAiZGlyZWN0IENlbnRyYWxIZWFwOjpSZWFsbG9jIiksCiAgXSwKIiIiCmlkeCA9IHMuZmluZCgnQ1VUUyA9IHsnKQphc3NlcnQgaWR4ICE9IC0xCmlkeCA9IHMuZmluZCgnXG4nLCBpZHgpICsgMQpzID0gc1s6aWR4XSArIGVudHJ5ICsgc1tpZHg6XQpvcGVuKHAsICd3JywgZW5jb2Rpbmc9J3V0Zi04Jykud3JpdGUocykKcHJpbnQoJyAgW09LXSBzZGsgU3RhbmRhcmRBbGxvY2F0b3IgQ2VudHJhbEhlYXAgYnlwYXNzIGN1dHMgaW5qZWN0ZWQnKQo=').decode('utf-8'))"
 
           #   B:   project.yml  -mcpu=apple-a18   A15 (iPhone 13)   A18 (16 Pro)  
           python3 -c '
@@ -134,7 +134,7 @@ jobs:
           cd "${{ github.workspace }}/nxnative"
           NEED_FULL_BUILD=1
           mkdir -p prev_art
-          if gh run download 40085854262 -n nxnative-output-ipa --dir prev_art 2>/dev/null || gh run download 40052586298 -n nxnative-output-ipa --dir prev_art 2>/dev/null; then
+          if gh run download 40092108924 -n nxnative-output-ipa --dir prev_art 2>/dev/null || gh run download 40085854262 -n nxnative-output-ipa --dir prev_art 2>/dev/null || gh run download 40052586298 -n nxnative-output-ipa --dir prev_art 2>/dev/null; then
             echo "==>  Metal ..."
             python3 -c '
             import zipfile, os
