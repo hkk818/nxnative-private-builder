@@ -185,15 +185,14 @@ jobs:
                   ver = os.path.basename(dirs[0]).replace("b-", "")
                   print(f"==> DMSH_CHAIN version: {ver}")
                   with open("dm/gfx/nvn/dmsh_chain.h", "w", encoding="utf-8") as f:
-                      f.write(f"#define DMSH_CHAIN \"{ver}\"
-")
+                      f.write('#define DMSH_CHAIN \"' + ver + '\"\n')
                   cmd = ["python3", "dm/gfx/tools/dmsh_chain.py", "--inputs"]
                   res = subprocess.run(cmd, env=dict(os.environ, DM_GAME=game), capture_output=True, text=True)
                   in_hash = res.stdout.strip()
                   tsv_path = os.path.join(dirs[0], "inputs.tsv")
                   if in_hash:
                       with open(tsv_path, "w", encoding="utf-8") as f:
-                          f.write(f"game\t{game}\ninputs\t{in_hash}\n")
+                          f.write('game\t' + game + '\ninputs\t' + in_hash + '\n')
                       print(f"  [OK] inputs.tsv stamped with {in_hash}")
               '
             fi
