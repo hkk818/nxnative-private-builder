@@ -15,13 +15,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 180
     env:
-      GAME: "01006BB00C6F0000"
-      DM_GAME: "01006BB00C6F0000"
-      PKG_VER: "v131072"
-      MODS_LIST: "main subsdk0 subsdk1 sdk"
-      ROMFS_MARKER: "region_common/shader/postprocess.bfsha"
-      OUT_IPA_NAME: "ZeldaLinksAwakening-shell.ipa"
-      ZIP_NAME: "exefs_ready_01006BB00C6F0000.zip"
+      GAME: "010015100B514000"
+      DM_GAME: "010015100B514000"
+      PKG_VER: "v327680"
+      MODS_LIST: "main sdk"
+      ROMFS_MARKER: "System/Resource"
+      OUT_IPA_NAME: "SMBWMobile-shell.ipa"
+      ZIP_NAME: "exefs_ready_010015100B514000.zip"
       WORK_DIR: "${{ github.workspace }}/game_work"
       DM_ROOT: "${{ github.workspace }}/game_work"
       WORK: "${{ github.workspace }}/game_work/tmp"
@@ -46,7 +46,9 @@ jobs:
 
           #   A:   Nintendo SDK 8.2.0   (  sdk build ID: 3ae34e689d7a35f13cbf42bfd672af8b)
           #   nnMain   StandardAllocator   AllocateTlsSlot  
-          python3 -c "import base64; exec(base64.b64decode('cCA9ICdkbS90b29scy9zZGtfcGF0Y2hlcy5weScKcyA9IG9wZW4ocCwgJ3InLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKZW50cnkgPSAiIiIgICMgVGhlIExlZ2VuZCBvZiBaZWxkYTogTGluaydzIEF3YWtlbmluZyAxLjEuMCBzZGsgcGF0Y2gKICAiM2FlMzRlNjg5ZDdhMzVmMTNjYmY0MmJmZDY3MmFmOGIiOiBbCiAgICAoMHgyZTc2NjAsICI2ODA2MDAzOSIsICI3ZjA2MDAzOSIsICJkaXNhYmxlIHRocmVhZCBjYWNoZSIpLAogICAgKDB4MmU3NjY0LCAiZjQwMDAwMzYiLCAiMDcwMDAwMTQiLCAic2tpcCBUTFMgc2xvdCBhbGxvYyIpLAogICAgKDB4MmU3NjdjLCAiYTAwMjAwMzUiLCAiMWYyMDAzZDUiLCAiaWdub3JlIFRMUyByZXN1bHQiKSwKICAgICgweDJlNzc4NCwgIjY4MDUwMDM0IiwgIjJiMDAwMDE0IiwgImRpcmVjdCBDZW50cmFsSGVhcDo6QWxsb2MiKSwKICAgICgweDJlNzg4YywgIjg4MDEwMDM0IiwgIjBjMDAwMDE0IiwgImRpcmVjdCBDZW50cmFsSGVhcDo6RnJlZSIpLAogICAgKDB4MmU3OTBjLCAiNDgwNjAwMzQiLCAiMzIwMDAwMTQiLCAiZGlyZWN0IENlbnRyYWxIZWFwOjpSZWFsbG9jIiksCiAgXSwKIiIiCmlkeCA9IHMuZmluZCgnQ1VUUyA9IHsnKQphc3NlcnQgaWR4ICE9IC0xCmlkeCA9IHMuZmluZCgnXG4nLCBpZHgpICsgMQpzID0gc1s6aWR4XSArIGVudHJ5ICsgc1tpZHg6XQpvcGVuKHAsICd3JywgZW5jb2Rpbmc9J3V0Zi04Jykud3JpdGUocykKcHJpbnQoJyAgW09LXSBzZGsgU3RhbmRhcmRBbGxvY2F0b3IgQ2VudHJhbEhlYXAgYnlwYXNzIGN1dHMgaW5qZWN0ZWQnKQo=').decode('utf-8'))"
+          if [ "$GAME" = "01006BB00C6F0000" ]; then
+            python3 -c "import base64; exec(base64.b64decode('cCA9ICdkbS90b29scy9zZGtfcGF0Y2hlcy5weScKcyA9IG9wZW4ocCwgJ3InLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKZW50cnkgPSAiIiIgICMgVGhlIExlZ2VuZCBvZiBaZWxkYTogTGluaydzIEF3YWtlbmluZyAxLjEuMCBzZGsgcGF0Y2gKICAiM2FlMzRlNjg5ZDdhMzVmMTNjYmY0MmJmZDY3MmFmOGIiOiBbCiAgICAoMHgyZTc2NjAsICI2ODA2MDAzOSIsICI3ZjA2MDAzOSIsICJkaXNhYmxlIHRocmVhZCBjYWNoZSIpLAogICAgKDB4MmU3NjY0LCAiZjQwMDAwMzYiLCAiMDcwMDAwMTQiLCAic2tpcCBUTFMgc2xvdCBhbGxvYyIpLAogICAgKDB4MmU3NjdjLCAiYTAwMjAwMzUiLCAiMWYyMDAzZDUiLCAiaWdub3JlIFRMUyByZXN1bHQiKSwKICAgICgweDJlNzc4NCwgIjY4MDUwMDM0IiwgIjJiMDAwMDE0IiwgImRpcmVjdCBDZW50cmFsSGVhcDo6QWxsb2MiKSwKICAgICgweDJlNzg4YywgIjg4MDEwMDM0IiwgIjBjMDAwMDE0IiwgImRpcmVjdCBDZW50cmFsSGVhcDo6RnJlZSIpLAogICAgKDB4MmU3OTBjLCAiNDgwNjAwMzQiLCAiMzIwMDAwMTQiLCAiZGlyZWN0IENlbnRyYWxIZWFwOjpSZWFsbG9jIiksCiAgXSwKIiIiCmlkeCA9IHMuZmluZCgnQ1VUUyA9IHsnKQphc3NlcnQgaWR4ICE9IC0xCmlkeCA9IHMuZmluZCgnXG4nLCBpZHgpICsgMQpzID0gc1s6aWR4XSArIGVudHJ5ICsgc1tpZHg6XQpvcGVuKHAsICd3JywgZW5jb2Rpbmc9J3V0Zi04Jykud3JpdGUocykKcHJpbnQoJyAgW09LXSBzZGsgU3RhbmRhcmRBbGxvY2F0b3IgQ2VudHJhbEhlYXAgYnlwYXNzIGN1dHMgaW5qZWN0ZWQnKQo=').decode('utf-8'))"
+          fi
 
           #   B:   project.yml  -mcpu=apple-a18   A15 (iPhone 13)   A18 (16 Pro)  
           python3 -c '
@@ -57,7 +59,7 @@ jobs:
           print("  [OK]  armv8.5-a iPhone 13  16 Pro")
           '
 
-          #   C:   hle_fs.c   Documents/romfs
+          #   C: 修复 hle_fs.c 自动检测 Documents/romfs (大小写全兼容: romfs / RomFS / ROMFS)
           python3 -c '
           p = "dm/host/hle_fs.c"
           s = open(p, "r", encoding="utf-8").read()
@@ -67,6 +69,10 @@ jobs:
               if (h) {
                   snprintf(buf, n, "%s/Documents/romfs/" DM_GAME_ROMFS_MARKER, h);
                   if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents/romfs", h); return buf; }
+                  snprintf(buf, n, "%s/Documents/RomFS/" DM_GAME_ROMFS_MARKER, h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents/RomFS", h); return buf; }
+                  snprintf(buf, n, "%s/Documents/ROMFS/" DM_GAME_ROMFS_MARKER, h);
+                  if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents/ROMFS", h); return buf; }
                   snprintf(buf, n, "%s/Documents/" DM_GAME_ROMFS_MARKER, h);
                   if (!access(buf, F_OK)) { snprintf(buf, n, "%s/Documents", h); return buf; }
               }
@@ -75,7 +81,7 @@ jobs:
           if (v) return v;"""
           assert old in s
           open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
-          print("  [OK] Documents/romfs ")
+          print("  [OK] Documents/romfs 大小写全兼容支持注入成功")
           '
 
           #   D:   main.c   Documents/aoc   DLC
@@ -134,11 +140,16 @@ jobs:
           cd "${{ github.workspace }}/nxnative"
           NEED_FULL_BUILD=1
           mkdir -p prev_art
-          if gh run download 40110505607 --repo "${{ github.repository }}" -n nxnative-output-ipa --dir prev_art 2>/dev/null || gh run download 40095010149 --repo "${{ github.repository }}" -n nxnative-output-ipa --dir prev_art 2>/dev/null || gh run download 40092108924 --repo "${{ github.repository }}" -n nxnative-output-ipa --dir prev_art 2>/dev/null || gh run download 40085854262 --repo "${{ github.repository }}" -n nxnative-output-ipa --dir prev_art 2>/dev/null; then
-            echo "==>  Metal ..."
+          PREV_RUN_ID=$(gh run list --repo "${{ github.repository }}" --workflow=build.yml -q ".[] | select(.conclusion==\"success\") | .databaseId" --json databaseId,conclusion --limit 5 | head -n 1)
+          if [ -n "$PREV_RUN_ID" ] && gh run download "$PREV_RUN_ID" --repo "${{ github.repository }}" -n nxnative-output-ipa --dir prev_art 2>/dev/null; then
+            echo "==> 检查历史构建中是否有匹配当前游戏的 Metal 着色器缓存..."
             python3 -c '
-            import zipfile, os
-            ipa_path = os.path.join("prev_art", "ZeldaLinksAwakening-shell.ipa")
+            import zipfile, os, sys
+            ipa_name = os.environ["OUT_IPA_NAME"]
+            ipa_path = os.path.join("prev_art", ipa_name)
+            if not os.path.exists(ipa_path):
+                print(f"历史产物非当前游戏 ({ipa_name})，需全量编译当前游戏着色器")
+                sys.exit(1)
             work = os.environ["WORK_DIR"]
             game = os.environ["GAME"]
             with zipfile.ZipFile(ipa_path, "r") as z:
@@ -162,10 +173,9 @@ jobs:
                     elif name == "Payload/DmIOS.app/dm/shader_map.tsv":
                         target = os.path.join("dm/games", game, "shader_map.tsv")
                         with open(target, "wb") as f: f.write(z.read(name))
-            print("  [OK] 25,000+  Metal ")
-            '
+            print("  [OK] 历史 Metal 着色器复用成功")
+            ' && NEED_FULL_BUILD=0 || NEED_FULL_BUILD=1
             if [ -f "dm/games/$GAME/c1_full.tsv" ] && [ -d "$WORK_DIR/shader/ios" ]; then
-              NEED_FULL_BUILD=0
               python3 -c '
               import os, glob, subprocess
               work = os.environ["WORK_DIR"]
@@ -175,7 +185,8 @@ jobs:
                   ver = os.path.basename(dirs[0]).replace("b-", "")
                   print(f"==> DMSH_CHAIN version: {ver}")
                   with open("dm/gfx/nvn/dmsh_chain.h", "w", encoding="utf-8") as f:
-                      f.write(f"#define DMSH_CHAIN \"{ver}\"\n")
+                      f.write(f"#define DMSH_CHAIN \"{ver}\"
+")
                   cmd = ["python3", "dm/gfx/tools/dmsh_chain.py", "--inputs"]
                   res = subprocess.run(cmd, env=dict(os.environ, DM_GAME=game), capture_output=True, text=True)
                   in_hash = res.stdout.strip()
@@ -189,7 +200,7 @@ jobs:
           fi
 
           if [ "$NEED_FULL_BUILD" -eq 1 ]; then
-            echo "==> ..."
+            echo "==> 正在完整编译游戏 Metal 着色器..."
             python3 dm/gfx/tools/shader_split.py \
               "$MINI_ROMFS" \
               "$EXEFS_SRC/main" \
