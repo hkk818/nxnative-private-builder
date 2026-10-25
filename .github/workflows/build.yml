@@ -15,13 +15,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 180
     env:
-      GAME: "0100B99019412000"
-      DM_GAME: "0100B99019412000"
-      PKG_VER: "v65536"
-      MODS_LIST: "main subsdk0 sdk"
-      ROMFS_MARKER: "Model/World08_Textures.bfres.zs"
-      OUT_IPA_NAME: "MarioVsDonkeyKong-shell.ipa"
-      ZIP_NAME: "exefs_ready_0100B99019412000.zip"
+      GAME: "010015100B514000"
+      DM_GAME: "010015100B514000"
+      PKG_VER: "v327680"
+      MODS_LIST: "main sdk"
+      ROMFS_MARKER: "System/Resource"
+      OUT_IPA_NAME: "SMBWMobile-shell.ipa"
+      ZIP_NAME: "exefs_ready_010015100B514000.zip"
       WORK_DIR: "${{ github.workspace }}/game_work"
       DM_ROOT: "${{ github.workspace }}/game_work"
       WORK: "${{ github.workspace }}/game_work/tmp"
