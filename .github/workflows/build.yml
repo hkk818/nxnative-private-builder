@@ -15,13 +15,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 180
     env:
-      GAME: "01006BB00C6F0000"
-      DM_GAME: "01006BB00C6F0000"
-      PKG_VER: "v131072"
-      MODS_LIST: "main subsdk0 subsdk1 sdk"
-      ROMFS_MARKER: "region_common/shader/postprocess.bfsha"
-      OUT_IPA_NAME: "ZeldaLinksAwakening-shell.ipa"
-      ZIP_NAME: "exefs_ready_01006BB00C6F0000.zip"
+      GAME: "010015100B514000"
+      DM_GAME: "010015100B514000"
+      PKG_VER: "v327680"
+      MODS_LIST: "main sdk"
+      ROMFS_MARKER: "System/Resource"
+      OUT_IPA_NAME: "SMBWMobile-shell.ipa"
+      ZIP_NAME: "exefs_ready_010015100B514000.zip"
       WORK_DIR: "${{ github.workspace }}/game_work"
       DM_ROOT: "${{ github.workspace }}/game_work"
       WORK: "${{ github.workspace }}/game_work/tmp"
