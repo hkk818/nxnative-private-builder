@@ -222,7 +222,6 @@ jobs:
                       print(f"  [OK] inputs.tsv stamped with {in_hash}")
               '
             fi
-          fi
 
           # 如果成功复用了历史着色器，但存在未翻译的新着色器（如 No-DoF 移轴去虚化 0d43a97756128f26）
           if [ -d "$WORK_DIR/shader/ios" ]; then
@@ -237,6 +236,9 @@ jobs:
                         os.path.join(work, "shader", "pkg"), os.path.join(work, "shader", "tables", "shader_map.tsv"),
                         os.path.join(work, "shader", "tables", "shader_facts.tsv"), os.path.join(work, "shader", "tables", "shader_pairs.tsv")]
                 subprocess.run(cmd1, check=True)
+                import shutil
+                shutil.copyfile(os.path.join(work, "shader", "tables", "shader_map.tsv"), os.path.join("dm/games", game, "shader_map.tsv"))
+                shutil.copyfile(os.path.join(work, "shader", "tables", "shader_pairs.tsv"), os.path.join("dm/games", game, "shader_pairs.tsv"))
                 env = dict(os.environ, MAIN=os.path.join(os.environ["EXEFS_SRC"], "main"),
                            XLATE=os.path.join(os.getcwd(), "dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate"),
                            IOSOUT=os.path.join(work, "shader", "ios"), J="8")
