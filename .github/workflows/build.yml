@@ -595,17 +595,7 @@ jobs:
 
             echo "==> 正在完整编译游戏 Metal 着色器..."
 
-            python3 dm/gfx/tools/shader_split.py \
-
-              "$MINI_ROMFS" \
-
-              "$EXEFS_SRC/main" \
-
-              "$WORK_DIR/shader/pkg" \
-
-              "$WORK_DIR/shader/tables/shader_map.tsv" \
-
-              "$WORK_DIR/shader/tables/shader_facts.tsv" \
+            python3 dm/gfx/tools/shader_split.py "$MINI_ROMFS" "$EXEFS_SRC/main" "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/tables/shader_map.tsv" "$WORK_DIR/shader/tables/shader_facts.tsv"
 
               "$WORK_DIR/shader/tables/shader_pairs.tsv"
 
@@ -625,9 +615,7 @@ jobs:
 
 
 
-            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" J=8 \
-
-              python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
+            MAIN="$EXEFS_SRC/main" XLATE="$PWD/dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate" IOSOUT="$WORK_DIR/shader/ios" J=8 python3 dm/gfx/tools/dmsh_build.py "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/cache"
 
           fi
 
@@ -679,22 +667,14 @@ jobs:
 
 
 
-          GAME="$GAME" \
-
-          W="$WORK_DIR" \
-
-          PATCHED="$WORK_DIR/patched_$PKG_VER" \
-
-          ROMFS="$WORK_DIR/data/$PKG_VER/RomFS" \
-
-          MSL_IOS="$WORK_DIR/shader/ios" \
-
-          DM_ICON="$ICON_FILE" \
-
-          DM_STANDALONE_MSL="YES" \
-
-          AOC="" \
-
+          export GAME="$GAME"
+          export W="$WORK_DIR"
+          export PATCHED="$WORK_DIR/patched_$PKG_VER"
+          export ROMFS="$WORK_DIR/data/$PKG_VER/RomFS"
+          export MSL_IOS="$WORK_DIR/shader/ios"
+          export DM_ICON="$ICON_FILE"
+          export DM_STANDALONE_MSL="YES"
+          export AOC=""
           bash dm/ios/tools/build_ipa.sh "$OUT_IPA"
 
 
