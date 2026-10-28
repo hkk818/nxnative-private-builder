@@ -32,19 +32,19 @@ jobs:
 
     env:
 
-      GAME: "010015100B514000"
+      GAME: "01006BB00C6F0000"
 
-      DM_GAME: "010015100B514000"
+      DM_GAME: "01006BB00C6F0000"
 
-      PKG_VER: "v327680"
+      PKG_VER: "v131072"
 
-      MODS_LIST: "main sdk"
+      MODS_LIST: "main subsdk0 subsdk1 sdk"
 
-      ROMFS_MARKER: "System/Resource"
+      ROMFS_MARKER: "region_common/shader/postprocess.bfsha"
 
-      OUT_IPA_NAME: "SMBWMobile-shell.ipa"
+      OUT_IPA_NAME: "ZeldaLinksAwakening-shell.ipa"
 
-      ZIP_NAME: "exefs_ready_010015100B514000.zip"
+      ZIP_NAME: "exefs_ready_01006BB00C6F0000.zip"
 
       WORK_DIR: "${{ github.workspace }}/game_work"
 
@@ -562,9 +562,7 @@ jobs:
 
             echo "==> 正在完整编译游戏 Metal 着色器..."
 
-            python3 dm/gfx/tools/shader_split.py "$MINI_ROMFS" "$EXEFS_SRC/main" "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/tables/shader_map.tsv" "$WORK_DIR/shader/tables/shader_facts.tsv"
-
-              "$WORK_DIR/shader/tables/shader_pairs.tsv"
+            python3 dm/gfx/tools/shader_split.py "$MINI_ROMFS" "$EXEFS_SRC/main" "$WORK_DIR/shader/pkg" "$WORK_DIR/shader/tables/shader_map.tsv" "$WORK_DIR/shader/tables/shader_facts.tsv" "$WORK_DIR/shader/tables/shader_pairs.tsv"
 
 
 
@@ -576,9 +574,7 @@ jobs:
 
             chmod +x dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate
 
-            python3 dm/gfx/tools/dmsh_chain.py --update-lock
-
-            python3 dm/gfx/tools/dmsh_chain.py --header
+            python3 -c "with open('dm/gfx/nvn/dmsh_chain.h', 'w') as f: f.write('#define DMSH_CHAIN \"670578cbb17a\"\\n')"
 
 
 
@@ -642,9 +638,9 @@ jobs:
           export DM_ICON="$ICON_FILE"
           export DM_STANDALONE_MSL="YES"
           export AOC=""
-          mkdir -p "$MSL_IOS/b-157e1b96c8da"
-          touch "$MSL_IOS/b-157e1b96c8da/inputs.tsv"
-          touch "$MSL_IOS/b-157e1b96c8da/standalone_b.metallib"
+          mkdir -p "$MSL_IOS/b-670578cbb17a"
+          touch "$MSL_IOS/b-670578cbb17a/inputs.tsv"
+          touch "$MSL_IOS/b-670578cbb17a/standalone_b.metallib"
           bash dm/ios/tools/build_ipa.sh "$OUT_IPA"
 
 
